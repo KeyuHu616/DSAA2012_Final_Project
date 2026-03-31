@@ -1,0 +1,12 @@
+.env
+models/*
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyi
+*.egg-info
+*.egg
+*.manifest
+*.spec
+node_modules
