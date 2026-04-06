@@ -61,34 +61,7 @@ mkdir -p "$SDXL_DIR"
 # ==========================================
 # 2. Fixed IP-Adapter Download (SDXL Only)
 # ==========================================
-# echo "📦 [2/3] Queuing IP-Adapter (SDXL)..."
-# IP_DIR="ip_adapter"
-# CLIP_DIR="$IP_DIR/image_encoder"
-# mkdir -p "$IP_DIR"
-# mkdir -p "$CLIP_DIR"
-
-# (
-#     cd "$IP_DIR" || exit 1
-
-#     # --- 1. Download SDXL Adapter Weights ---
-#     # 根据图1: 文件位于 /sdxl_models/ 目录下
-#     # 我们下载标准的 Vit-H 版本
-#     echo "🔽 Downloading ip-adapter_sdxl_vit-h.safetensors..."
-#     download_async_if_missing "https://hf-mirror.com/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors" "ip-adapter_sdxl_vit-h.safetensors"
-
-#     # --- 2. Download CLIP Vision Encoder ---
-#     # 根据图2: 文件位于 /sdxl_models/image_encoder/ 目录下 (注意路径变化)
-#     echo "🔽 Downloading CLIP Vision Encoder (Config & Weights)..."
-#     cd "../$CLIP_DIR" || exit 1
-
-#     # 下载 config.json
-#     aria2c -x 8 -s 8 -c --quiet "https://hf-mirror.com/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/config.json" -o "config.json"
-#     if [ $? -ne 0 ]; then echo "❌ Failed: clip_vision config.json"; increment_error; fi
-
-#     # 下载 model.safetensors (CLIP Vision 权重)
-#     download_async_if_missing "https://hf-mirror.com/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors" "model.safetensors"
-
-# ) &
+##TODO
 
 # ==========================================
 # 3. Improved LLM Download (串行小文件 + 并行大文件) with Skip Logic
