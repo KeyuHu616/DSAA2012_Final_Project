@@ -13,4 +13,5 @@ dependencies:
   - huggingface_hub=0.24.6
   - accelerate=0.33.0
   - diffusers=0.26.0
-prefix: /home/lizhenzhuo/envs/anaconda3/envs/storygen
+  - aria2
+  - git-lfs
