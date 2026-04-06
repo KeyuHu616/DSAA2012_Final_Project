@@ -5,17 +5,12 @@ channels:
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
 dependencies:
-  - python=3.10
-  - torchvision
-  - pytorch-cuda=11.8
+  - python=3.11
   - pytorch
-  - torchaudio
-  - matplotlib
+  - torchvision
   - opencv
-  - scikit-image
-  - pillow
-  - numpy
-  - git-lfs
-  - aria2
-  - accelerate
+  - transformers=4.39.3
+  - huggingface_hub=0.24.6
+  - accelerate=0.33.0
+  - diffusers=0.26.0
 prefix: /home/lizhenzhuo/envs/anaconda3/envs/storygen
