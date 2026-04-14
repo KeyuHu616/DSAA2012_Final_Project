@@ -10,14 +10,14 @@
     },
     {
       "index": 2,
-      "raw_text": "She looks out the window quietly.",
+      "raw_text": "Lily looks out the window quietly.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to Panel 1. [Lily_001] same slender mid-20s woman with short brown bob, gentle brown eyes, wearing the SAME cream oversized knit sweater and beige linen trousers as Panel 1. She is standing at the window, gazing outside, one hand resting on the sill, calm and wistful expression with eyes unfocused on the middle distance. Medium close-up shot, over-the-shoulder 3/4 profile angle. Same kitchen as Panel 1, now at the window wall — sheer white curtain, herb pots on windowsill (identical to Panel 1), blurred outdoor greenery beyond. Warm natural morning sunlight from the window, same golden color temperature as Panel 1. Mood: introspective peaceful solitude.",
       "negative_prompt": "blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face, text, watermark, signature, cartoon, anime, photorealistic, different outfit, different hairstyle, different character, harsh shadows, oversaturated",
       "reference_image": "results/01/panel_1.png"
     },
     {
       "index": 3,
-      "raw_text": "She sits down to eat with a book beside her.",
+      "raw_text": "Lily sits down to eat with a book beside her.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to previous panels. [Lily_001] same slender mid-20s woman with short brown bob, gentle brown eyes, wearing the SAME cream oversized knit sweater and beige linen trousers as Panels 1–2. She is seated at a wooden dining table, eating with a spoon, relaxed posture with a gentle gaze alternating between her plate and an open book. Medium shot, eye-level with a slight 15° overhead tilt. Apartment dining area adjacent to the kitchen — wooden dining table, ceramic plate, open book, white mug; the kitchen from Panels 1–2 faintly visible in the background, herb pots visible through the background window. Warm natural morning sunlight, same golden color temperature as previous panels. Mood: cozy slow-morning warmth.",
       "negative_prompt": "blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face, text, watermark, signature, cartoon, anime, photorealistic, different outfit, different hairstyle, different character, harsh shadows, oversaturated",
       "reference_image": "results/01/panel_2.png"

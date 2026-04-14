@@ -10,14 +10,14 @@
     },
     {
       "index": 2,
-      "raw_text": "He pauses at the door and looks ahead.",
+      "raw_text": "Ryan pauses at the door and looks ahead.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to Panel 1. [Ryan_001] same lean late-20s man with short dark hair and light stubble, wearing the SAME navy blue commuter jacket, grey slim trousers, white sneakers, and olive green backpack on his left shoulder as Panel 1. He is stopped at the open bus door, one foot on the step, right hand gripping the rail, brief pause with eyes directed ahead with resolve. Medium shot, low angle looking slightly up at the door. Bus entry door threshold — bus door frame, interior warm light spilling out, street visible behind. Mixed lighting: cool outdoor daylight + warm interior bus light. Mood: brief moment of resolve and transition. Same bus from Panel 1; Ryan has now reached the door.",
       "negative_prompt": "blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face, text, watermark, signature, cartoon, anime, photorealistic, different outfit, different hairstyle, different character, missing backpack, harsh shadows, oversaturated",
       "reference_image": "results/02/panel_1.png"
     },
     {
       "index": 3,
-      "raw_text": "He gets inside and sits by the window.",
+      "raw_text": "Ryan gets inside and sits by the window.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to previous panels. [Ryan_001] same lean late-20s man with short dark hair and light stubble, wearing the SAME navy blue commuter jacket, grey slim trousers, and white sneakers as Panels 1–2; the SAME olive green backpack now resting on his lap. He is seated inside the bus, body angled toward the window, calm outward gaze through the window, settled. Medium close-up shot, eye-level from across the aisle. Bus interior — bus seat rows, window with passing cityscape, overhead rack visible. Warm interior bus light with cool daylight filtering through the window. Mood: calm in-transit quietude. Interior of the same bus from Panel 2.",
       "negative_prompt": "blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face, text, watermark, signature, cartoon, anime, photorealistic, different outfit, different hairstyle, different character, missing backpack, harsh shadows, oversaturated",
       "reference_image": "results/02/panel_2.png"

@@ -10,14 +10,14 @@
     },
     {
       "index": 2,
-      "raw_text": "It chases a ball.",
+      "raw_text": "A dog chases a ball.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to Panel 1. [Dog_001] the SAME medium-sized golden retriever mix with floppy ears, bright round eyes, golden-amber fur, and the SAME distinctive cream/white chest patch as Panel 1, fluffy golden tail. The dog is in a low crouched run, eyes locked on a bouncing yellow tennis ball, ears forward, intense focused gaze, mouth slightly open. Medium shot, dynamic low angle. Same meadow as Panel 1, mid-field — yellow tennis ball in foreground trajectory, grass, open sky. Bright outdoor natural sunlight, same warm golden color temperature as Panel 1. Mood: focused playful determination. Same meadow; continuous chase from Panel 1.",
       "negative_prompt": "blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, cartoon, anime, photorealistic, different dog, different breed, missing chest patch, multiple dogs, harsh shadows, oversaturated",
       "reference_image": "results/03/panel_1.png"
     },
     {
       "index": 3,
-      "raw_text": "It returns happily.",
+      "raw_text": "A dog returns happily.",
       "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to previous panels. [Dog_001] the SAME medium-sized golden retriever mix with floppy ears, golden-amber fur, and the SAME distinctive cream/white chest patch as Panels 1–2. The dog is trotting toward camera, the SAME yellow tennis ball from Panel 2 held in its mouth, ears up, tail raised and wagging, eyes bright and triumphant. Medium shot, eye-level with the dog approaching the camera. Same meadow as before — same meadow grass, warm afternoon light, open sky. Bright outdoor natural sunlight, same warm golden color temperature as previous panels. Mood: happy triumphant return. Same meadow; the dog is returning from the direction of Panel 2.",
       "negative_prompt": "blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, cartoon, anime, photorealistic, different dog, different breed, missing chest patch, missing ball, multiple dogs, harsh shadows, oversaturated",
       "reference_image": "results/03/panel_2.png"
