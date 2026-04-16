@@ -1,163 +1,125 @@
 #!/usr/bin/env python3
 # File: src/sdxl_generator.py
-# Description: Baseline SDXL 1.0 Image Generator.
-# This script strictly follows the "Baseline Inference" requirement:
-# - Offline operation (no internet connection required after download)
-# - Local model loading
-# - Simple text-to-image generation
-
+# Description: SDXL 1.0 + IP-Adapter for Consistent Character Generation
 import os
-import sys
-from pathlib import Path
-from diffusers import StableDiffusionXLPipeline
 import torch
-
-# ---------------------------------------------------
-# 🔒 安全设置：禁止任何网络请求 (Compliance Requirement)
-# ---------------------------------------------------
-# 为了满足项目合规性（禁止Agent/外部API），我们强制 diffusers 离线运行。
-# 如果模型文件已下载，这将确保代码不会尝试连接 Hugging Face Hub。
-os.environ['HF_DATASETS_OFFLINE'] = '1'
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
-
-# 可选：如果你的环境中没有网络，取消下面这行的注释，强制 PyTorch 也不尝试下载预训练权重
-# os.environ['TORCH_HOME'] = '/path/to/your/local/torch/cache' 
+from diffusers import StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, EulerDiscreteScheduler
+from diffusers.utils import load_image
+from pathlib import Path
+from PIL import Image
 
 class SDXLGenerator:
-    """
-    A wrapper class for Stable Diffusion XL 1.0 baseline generation.
-    This meets the "Baseline Inference" checkpoint requirement.
-    """
-    
-    def __init__(self, model_path: str = None, device='cuda'):
+    def __init__(self, model_path: str = None, ip_adapter_path: str = None, device="cuda"):
         """
-        Initialize the pipeline.
+        初始化包含 IP-Adapter 的生成器。
         
         Args:
-            model_path (str): Path to the local SDXL model directory.
-                             If None, it defaults to 'models/sdxl' as per the project plan.
+            model_path: SDXL 基础模型路径 (.safetensors 或 目录)
+            ip_adapter_path: IP-Adapter 模型路径 (通常为 'ip-adapter_sdxl_vit-h.safetensors')
+            device: 运行设备
         """
-        # 1. 设置默认路径 (符合项目架构映射)
-        if model_path is None:
-            self.model_path = Path(__file__).parent.parent / "models/sdxl/sd_xl_base_1.0.safetensors"
-        else:
-            self.model_path = Path(model_path)
-        
-        if not self.model_path.exists():
-            raise FileNotFoundError(f"Model path not found: {self.model_path}. "
-                                   "Please run scripts/download_models.sh first.")
-        
-        print(f"📂 Loading SDXL from: {self.model_path}")
-        
-        # 2. 构建流水线 (Pipeline)
-        # 注意: 我们在这里显式指定 local_files_only=True 以确保合规
-        try:
-            self.pipe = StableDiffusionXLPipeline.from_single_file(
-                self.model_path.as_posix(),
-                torch_dtype=torch.float16, # 推荐使用半精度以节省显存
-                local_files_only=True # 🚫 关键合规设置：绝对禁止网络请求
-            )
-        except Exception as e:
-            print(f"❌ Error loading model: {e}")
-            print("Ensure the model is correctly downloaded in the 'models/sdxl' directory.")
-            raise
-        
-        # 3. 设备选择 (GPU优先)
-        # 根据文档，我们假设环境已配置好 CUDA (environment.yml)
         self.device = device
-        if self.device == "cpu":
-            print("⚠️  Warning: CUDA not available. Falling back to CPU (very slow).")
+        self.model_path = model_path or Path(__file__).parent.parent / "models" / "sdxl" / "sd_xl_base_1.0.safetensors"
+        self.ip_adapter_path = ip_adapter_path or Path(__file__).parent.parent / "models" / "ip-adapter" / "sdxl_models" / "ip-adapter_sdxl.safetensors"
         
-        self.pipe.to(self.device)
+        # 1. 初始化基础 Pipeline
+        # 注意：我们使用 from_single_file 需要确保环境支持
+        self.pipe = StableDiffusionXLPipeline.from_single_file(
+            self.model_path.as_posix(),
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+            local_files_only=True
+        )
         
-        # 4. ⚠️ 安全措施：如果使用 CPU，限制高度和宽度以防止内存爆炸
-        if self.device == "cpu":
-            self.pipe.enable_attention_slicing()
-            print("Enabled attention slicing for CPU memory efficiency.")
+        # 2. 加载 IP-Adapter
+        # 参考文档: https://huggingface.co/docs/diffusers/using-diffusers/ip_adapter
+        # self.pipe.load_ip_adapter(
+        #     "h94/IP-Adapter", # 如果你下载了本地文件，这里可以改为本地路径字符串，或者直接用下面的 `ip_adapter_ckpt` 参数指定本地路径
+        #     subfolder="sdxl_models",
+        #     weight_name="ip-adapter_sdxl_vit-h.safetensors", # 如果你指定了本地路径，请确保文件存在
+        #     image_encoder_folder="models/image_encoder", # 如果有本地 image_encoder
+        #     torch_dtype=torch.float16
+        # )
+        # 如果你是直接加载本地下载的 checkpoint，请使用以下方式代替上面的 load_ip_adapter：
+        self.pipe.load_ip_adapter(self.ip_adapter_path.parent.parent.as_posix(),
+                                  subfolder="sdxl_models",
+                                  weight_name=self.ip_adapter_path.name, 
+                                  local_files_only=True,
+                                  torch_dtype=torch.float16)
 
-    def generate_image(self, prompt: str, output_path: str, 
-                       negative_prompt: str = None,
-                       width: int = 1024, height: int = 1024,
-                       guidance_scale: float = 7.5, num_inference_steps: int = 30) -> bool:
+        # 3. 启用必要的内存优化
+        self.pipe.enable_vae_slicing()
+        self.pipe.enable_model_cpu_offload() # 自动管理 GPU/CPU 内存，对于大模型非常必要
+        
+        # 4. 设置调度器 (Scheduler)
+        self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
+
+        # 5. 将 pipeline 移动到设备
+        self.pipe.to(self.device)
+
+        print(f"✅ SDXL + IP-Adapter 加载完成。设备: {self.device}")
+
+    def generate_image(self, prompt: str, output_path: str, negative_prompt: str = None,
+                       width: int = 1024, height: int = 1024, num_inference_steps: int = 30,
+                       guidance_scale: float = 7.5, ip_adapter_scale: float = 0.6,
+                       reference_image_path: str = None) -> bool:
         """
-        Generate a single image from a text prompt.
-        
-        This function satisfies the "Baseline Inference" requirement in the plan.
-        
+        核心生成函数。
+        如果 reference_image_path 为 None (第一帧)，使用 txt2img。
+        如果 reference_image_path 存在 (后续帧)，使用 img2img + IP-Adapter。
+
         Args:
-            prompt (str): The text prompt describing the image.
-            output_path (str): Where to save the generated image (e.g., 'results/test_cat.png').
-            negative_prompt (str, optional): Things to avoid in the image.
-            width (int): Image width.
-            height (int): Image height.
-            
-        Returns:
-            bool: True if successful, False otherwise.
+            reference_image_path: 参考图像路径 (来自 JSON 的 reference_image 字段)
+            ip_adapter_scale: IP-Adapter 的控制强度 (0.0 - 1.0, 0.6 通常效果较好)
         """
-        print(f"🎨 Generating image for prompt: {prompt[:50]}...") # 打印前50个字符
-        print(f"💾 Output path: {output_path}")
+        print(f"🎨 正在生成: {prompt[:50]}...")
+        print(f"💾 输出路径: {output_path}")
         
         try:
-            # 执行推理
-            # 注意: 对于 SDXL，建议分辨率是 1024x1024
-            image = self.pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt or "blurry, low quality, text, watermark",
-                width=width,
-                height=height,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                # SDXL 需要指定生成的高宽，这对多图生成的一致性很重要
-            ).images[0]
-            
+            dummy_image = Image.new('RGB', (512, 512), color='black')
+            # 处理参考图像
+            if reference_image_path and os.path.exists(reference_image_path):
+                print(f"🔗 检测到参考图像: {reference_image_path} (启用 IP-Adapter)")
+                # 加载图像
+                reference_image = load_image(reference_image_path).convert("RGB")
+                
+                # 启用 IP-Adapter 并设置权重
+                self.pipe.set_ip_adapter_scale(ip_adapter_scale)
+                
+                # 使用 img2img 进行生成 (因为需要参考图像)
+                image = self.pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    ip_adapter_image=reference_image, # 传入参考图
+                    # 注意: IP-Adapter 会自动从 reference_image 提取特征
+                    width=width,
+                    height=height,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    # img2img 特有参数
+                    strength=0.4, # 噪声强度 (0.3-0.6), 控制参考图对新图的影响程度
+                ).images[0]
+            else:
+                # 第一帧：纯文本生成
+                print("🆕 无参考图像 (第一帧)，使用纯文本生成")
+                self.pipe.set_ip_adapter_scale(0.0) # 关闭 IP-Adapter 影响
+                image = self.pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    ip_adapter_image=dummy_image, 
+                    width=width,
+                    height=height,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                ).images[0]
+
             # 保存图像
             output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True) # 确保目录存在
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             image.save(output_path)
-            print(f"✅ Success! Image saved to {output_path}")
-            
+            print(f"✅ 成功保存: {output_path}")
             return True
-            
+
         except Exception as e:
-            print(f"❌ Generation failed: {e}")
+            print(f"❌ 生成失败: {e}")
             return False
-
-
-# ---------------------------------------------------
-# 🚀 Main Block: "Hello World" Test
-# ---------------------------------------------------
-# 这个部分用于验证 Checkpoint 1.3: 基线推理
-# 运行此脚本直接生成测试图
-if __name__ == "__main__":
-    """
-    This main block serves as the "Hello World" test.
-    It verifies that the environment is set up correctly.
-    """
-    print("🚀 Starting SDXL Baseline Test...")
-    
-    # 1. 初始化生成器
-    try:
-        generator = SDXLGenerator()
-    except Exception as e:
-        print(f"Initialization Error: {e}")
-        print("Please check your model path and environment.yml dependencies.")
-        sys.exit(1)
-    
-    # 2. 定义测试参数 (Hard-coded for the baseline test)
-    test_prompt = "A photo of a cute cat sitting on a windowsill, sunny day, realistic"
-    test_output = "results/test_cat.png" # 符合计划中的验证路径
-    
-    # 3. 执行生成
-    success = generator.generate_image(
-        prompt=test_prompt,
-        output_path=test_output,
-        width=1024,
-        height=1024
-    )
-    
-    if success:
-        print("\n🎉 Baseline Test Passed! You are ready for the next stage.")
-        print("Next Step: Proceed to LLM Prompt Engineering (Stage 2).")
-    else:
-        print("\n🛑 Baseline Test Failed. Check the error logs above.")
-        sys.exit(1)
