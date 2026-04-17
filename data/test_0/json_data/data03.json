@@ -3,23 +3,23 @@
   "panels": [
     {
       "index": 1,
-      "raw_text": "A dog runs across a field.",
-      "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette. [Dog_001] a medium-sized athletic golden retriever mix with floppy ears, bright round eyes, an open friendly expression, golden-amber fur, a distinctive cream/white chest patch, no collar, fluffy golden tail. The dog is sprinting at full gallop across an open green meadow, ears back, tongue out, eyes bright — pure joyful speed. Wide shot, eye-level angle. Open green meadow in bright daytime with tall grass in the foreground, distant treeline, and clear sky. Bright outdoor natural sunlight, warm golden color temperature. Mood: joyful boundless freedom.",
-      "negative_prompt": "blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, cartoon, anime, photorealistic, multiple dogs, harsh shadows, oversaturated, cluttered background",
+      "raw_text": "Dog runs across a field.",
+      "expanded_prompt": "Wide shot, full-body side view, dog at full gallop. A medium-sized golden-amber dog sprints across an open grass meadow, all four legs extended in mid-stride, ears swept back by the wind, tongue out, fluffy golden tail streaming behind. Cream-white chest patch visible. Tall grass in the foreground, distant treeline, clear blue sky. Bright outdoor sunlight, warm daylight. Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm approachable palette.",
+      "negative_prompt": "close-up, headshot, portrait, face close-up, zoomed in on head, cropped body, only face visible, static pose, sitting, blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, photorealistic, multiple dogs, harsh shadows, oversaturated, cluttered background",
       "reference_image": null
     },
     {
       "index": 2,
-      "raw_text": "A dog chases a ball.",
-      "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to Panel 1. [Dog_001] the SAME medium-sized golden retriever mix with floppy ears, bright round eyes, golden-amber fur, and the SAME distinctive cream/white chest patch as Panel 1, fluffy golden tail. The dog is in a low crouched run, eyes locked on a bouncing yellow tennis ball, ears forward, intense focused gaze, mouth slightly open. Medium shot, dynamic low angle. Same meadow as Panel 1, mid-field — yellow tennis ball in foreground trajectory, grass, open sky. Bright outdoor natural sunlight, same warm golden color temperature as Panel 1. Mood: focused playful determination. Same meadow; continuous chase from Panel 1.",
-      "negative_prompt": "blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, cartoon, anime, photorealistic, different dog, different breed, missing chest patch, multiple dogs, harsh shadows, oversaturated",
+      "raw_text": "Dog chases a ball.",
+      "expanded_prompt": "Wide shot, dynamic low angle, full-body composition. A medium-sized golden-amber dog runs low and fast through meadow grass, body crouched, front legs reaching forward in a sprint, hind legs pushing off the ground, eyes locked on a yellow tennis ball bouncing in the foreground ahead. Ears pinned forward, mouth slightly open, cream-white chest patch visible, fluffy golden tail trailing. Meadow grass, open sky. Bright warm daylight. Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm approachable palette.",
+      "negative_prompt": "close-up, headshot, portrait, face close-up, zoomed in on head, cropped body, only face visible, static pose, sitting, blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, photorealistic, different breed, missing chest patch, multiple dogs, harsh shadows, oversaturated",
       "reference_image": "results/03/panel_1.png"
     },
     {
       "index": 3,
-      "raw_text": "A dog returns happily.",
-      "expanded_prompt": "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette — IDENTICAL style to previous panels. [Dog_001] the SAME medium-sized golden retriever mix with floppy ears, golden-amber fur, and the SAME distinctive cream/white chest patch as Panels 1–2. The dog is trotting toward camera, the SAME yellow tennis ball from Panel 2 held in its mouth, ears up, tail raised and wagging, eyes bright and triumphant. Medium shot, eye-level with the dog approaching the camera. Same meadow as before — same meadow grass, warm afternoon light, open sky. Bright outdoor natural sunlight, same warm golden color temperature as previous panels. Mood: happy triumphant return. Same meadow; the dog is returning from the direction of Panel 2.",
-      "negative_prompt": "blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, cartoon, anime, photorealistic, different dog, different breed, missing chest patch, missing ball, multiple dogs, harsh shadows, oversaturated",
+      "raw_text": "Dog returns happily.",
+      "expanded_prompt": "Medium-wide shot, full-body view, dog trotting toward the camera. A medium-sized golden-amber dog trots across grass toward the viewer, all four paws visible in stride, a yellow tennis ball held in its mouth, fluffy golden tail raised and wagging, ears up, eyes bright. Cream-white chest patch visible. Meadow grass underfoot, warm afternoon light, open sky in the background. Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm approachable palette.",
+      "negative_prompt": "close-up, headshot, portrait, face close-up, zoomed in on head, cropped body, only face visible, static pose, blurry, low quality, deformed legs, extra limbs, distorted anatomy, text, watermark, signature, photorealistic, different breed, missing chest patch, missing ball, multiple dogs, harsh shadows, oversaturated",
       "reference_image": "results/03/panel_2.png"
     }
   ]
