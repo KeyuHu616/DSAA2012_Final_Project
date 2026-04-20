@@ -13,3 +13,6 @@ __pycache__
 *.spec
 node_modules
 demo_test.ipynb
+archive/*
+*.tar
+*.tar.gz

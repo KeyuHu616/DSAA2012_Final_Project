@@ -104,37 +104,70 @@ class EnhancedPipelineRunner:
         return True
     
     def _generate_panel(self, panel: dict, story_id: str) -> bool:
-        """生成单帧面板"""
         idx = panel["index"]
         prompt = panel["expanded_prompt"]
         neg_prompt = panel["negative_prompt"]
-        
+
         # 计算输出路径
         out_dir = self.results_root / story_id
         out_path = out_dir / f"panel_{idx}.png"
-        
-        # 确定参考图路径（Panel1无参考，PanelN参考前一帧）
-        ref_path = None
-        if idx > 1:
-            prev_frame = out_dir / f"panel_{idx-1}.png"
-            if prev_frame.exists():
-                ref_path = str(prev_frame)
-            else:
-                print(f"⚠️ 参考帧不存在: {prev_frame}，降级为纯文本生成")
-        
-        # 注入全局画风前缀（保持与原runner一致）
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 全局画风前缀
         GLOBAL_STYLE = "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette, 2d art style"
         full_prompt = f"{GLOBAL_STYLE}, {prompt}"
-        
-        print(f"\n--- 生成Panel {idx}: {prompt[:40]}... ---")
-        return self.sdxl_gen.generate_image(
-            prompt=full_prompt,
-            output_path=str(out_path),
-            negative_prompt=neg_prompt,
-            reference_image_path=ref_path,
-            ip_adapter_scale=0.6 if ref_path else None
-        )
 
+        print(f"\n🎬 生成 Panel {idx}: {prompt[:40]}...")
+
+        # ========== 首帧处理 ==========
+        if idx == 1:
+            print("   🆕 首帧模式 (无参考图)")
+            # ✅ 修正：使用新参数名，显式置空
+            success = self.sdxl_gen.generate_image(
+                prompt=full_prompt,
+                output_path=str(out_path),
+                negative_prompt=neg_prompt,
+                ip_ref_image=None,    # 新参数名
+                ctrl_ref_image=None   # 新参数名
+            )
+            
+            # ✅ 首帧生成后，立即派生 ControlNet 控制图
+            if success and out_path.exists():
+                control_path = out_dir / f"panel_{idx}_control.png"
+                try:
+                    from PIL import Image, ImageFilter
+                    img = Image.open(out_path).convert("RGB")
+                    img = img.resize((1024, 1024), Image.Resampling.LANCZOS)
+                    edges = img.filter(ImageFilter.FIND_EDGES)
+                    edges.save(control_path)
+                    print(f"💡 已生成控制图: {control_path.name}")
+                except Exception as e:
+                    print(f"⚠️ 控制图生成失败: {e}")
+            return success
+
+        # ========== 后续帧处理 ==========
+        else:
+            print("   🔗 连续帧模式 (IP+ControlNet)")
+            # ✅ 修正：分离两种参考图
+            ip_ref_path = out_dir / f"panel_{idx-1}.png"       # IP用：上一帧
+            ctrl_ref_path = out_dir / "panel_1_control.png"    # Control用：首帧边缘
+
+            # 防御性检查
+            if not ip_ref_path.exists():
+                print(f"⚠️  IP参考图缺失: {ip_ref_path}, 降级为文本生成")
+                ip_ref_path = None
+            if not ctrl_ref_path.exists():
+                print(f"⚠️  控制图缺失: {ctrl_ref_path}, ControlNet将关闭")
+                ctrl_ref_path = None
+
+            # ✅ 调用新接口
+            return self.sdxl_gen.generate_image(
+                prompt=full_prompt,
+                output_path=str(out_path),
+                negative_prompt=neg_prompt,
+                ip_ref_image=str(ip_ref_path) if ip_ref_path else None,
+                ctrl_ref_image=str(ctrl_ref_path) if ctrl_ref_path else None
+            )
 
 def main():
     parser = argparse.ArgumentParser(description="增强版Pipeline：从txt直接生成故事图片")
