@@ -112,8 +112,9 @@ class EnhancedPipelineRunner:
         out_path = out_dir / f"panel_{idx}.png"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Global style prefix
-        GLOBAL_STYLE = "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette, 2d art style"
+        # Global style prefix - PREPENDED so CLIP truncates style, not content
+        # CLIP truncates from END, so we put less important style at the START
+        GLOBAL_STYLE = "2d storyboard art, clean lines, flat colors, cel-shading, warm palette"
         full_prompt = f"{GLOBAL_STYLE}, {prompt}"
 
         print(f"\n[GENERATING] Panel {idx}: {prompt[:40]}...")

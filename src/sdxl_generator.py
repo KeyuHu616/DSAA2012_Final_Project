@@ -43,7 +43,11 @@ class SDXLGenerator:
         self.ip_adapter_loaded = False
         self.controlnet = None
         self.controlnet_loaded = False
-        self.default_control_weight = 0.37  # Balanced control strength
+        # Default weights: Balanced configuration (Combination B)
+        # ControlNet: 0.30 - Reduced for more action freedom
+        # IP-Adapter (with ControlNet): 0.80 - Enhanced character consistency
+        # IP-Adapter (without ControlNet): 0.87 - Maximum consistency for first-frame-based ref
+        self.default_control_weight = 0.30
 
         print(f"[SDXL] Initialization complete. IP/ControlNet in sleep mode.")
 
@@ -191,8 +195,9 @@ class SDXLGenerator:
                         final_ip_image = final_ip_image.resize((width, height), Image.Resampling.LANCZOS)
                     else:
                         final_ip_image = ip_ref_image
-                    # Weight strategy
-                    ip_adapter_scale_val = 0.71 if control_image_tensor is not None else 0.79
+                    # Weight strategy: Balanced configuration (Combination B)
+                    # Higher IP weight when using ControlNet to compensate for reduced control
+                    ip_adapter_scale_val = 0.80 if control_image_tensor is not None else 0.87
                     logger.info(f"[IP-Adapter] Strength: {ip_adapter_scale_val:.2f}")
 
                 # --- 3. Narrative enhancement ---

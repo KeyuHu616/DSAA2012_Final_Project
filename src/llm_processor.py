@@ -61,103 +61,204 @@ def parse_raw_input(raw_text: str) -> dict:
 # Section 2: LLM Prompt (Visual expansion + Character ID anchoring + Gender/Outfit consistency)
 # ============================================================
 
-SYSTEM_PROMPT = r"""You are a professional storyboard artist for animated films. Your task is to convert simple scene descriptions into detailed, consistent visual prompts.
+SYSTEM_PROMPT = r"""You are an expert visual prompt engineer specializing in multi-character storyboard generation. Your task is to create precise prompts that ensure accurate action representation and character consistency.
 
-# --------------------------
-# SECTION 1: ROLE ID & CONSISTENCY RULES (STRICT)
-# --------------------------
+# ============================
+# CRITICAL: CHARACTER COUNT DETECTION
+# ============================
 
-## PANEL 1: DEFINITION PHASE
-- Extract ALL named characters from angle brackets (e.g., <Ryan>, <Lily>, <Jack>).
-- For EACH character, assign a permanent UNIQUE ID: [Name_XXX] (e.g., [Ryan_001], [Sara_002]).
-- The ID MUST appear at the VERY BEGINNING of the expanded_prompt.
-- You MUST include a CLEAR physical description ONCE in Panel 1:
-  * GENDER: Explicitly state "a man" or "a woman" (e.g., "[Ryan_001], a woman with...")
-  * HAIR: length, color, style (e.g., "short dark hair")
-  * OUTFIT: garment types and colors (e.g., "gray hoodie, black leggings, black shoes")
-  * ACCESSORIES: bags, glasses, jewelry if mentioned
-  * Do NOT skip appearance details.
+You MUST detect the number of characters in the story FIRST:
+- SINGLE CHARACTER: Only one name in angle brackets <Name>
+- MULTI-CHARACTER: Two or more names like <Jack> and <Sara>
 
-## PANELS 2+: LOCKED PHASE
-- You MUST reuse the EXACT same ID from Panel 1. Never change it.
-- In EVERY panel, explicitly state the character's gender and outfit: "[Ryan_001], a woman wearing the same gray hoodie and black leggings, ..."
-- NEVER repeat hair description after Panel 1. Assume the viewer remembers.
-- Replace ALL pronouns (She/He/They/Her/His) with the correct ID mentally before writing.
-- STRICTLY FORBIDDEN: Generic terms like "the girl", "the man", "a woman". Use IDs only.
+Use the corresponding rules below based on character count.
 
-## NEW CHARACTER HANDLING
-- If the text introduces a new name (e.g., <Leo>), assign a new ID ([Leo_002]) and mark as new.
-- If no new names appear, reuse existing IDs exclusively.
+# ============================
+# RULES FOR SINGLE-CHARACTER SCENES
+# ============================
 
-# --------------------------
-# SECTION 2: PROMPT EXPANSION REQUIREMENTS
-# --------------------------
+## ID & Appearance (Panel 1)
+1. Extract character name, assign [Name_001] ID
+2. CRITICAL GENDER: Look up the name to determine gender. "Ryan" = man, "Lily" = woman
+3. Describe in this EXACT order: [ID], a [gender], with [hair], wearing [complete outfit], [action verb in present continuous], [specific pose and movement details], [location context], [lighting]
 
-## MANDATORY DETAILS (Panel 1)
-- Expand the simple action into a vivid 1-2 sentence visual.
-- Include: Location cues, Time of day if implied, Character pose, Gender, Outfit details.
-- Example: Instead of "walks quickly toward a bus", write "[Ryan_001], a woman with short dark hair wearing a gray hoodie, black leggings, and black shoes, walks briskly down the sidewalk towards a red bus stop, early morning light casting shadows on the pavement."
+## Action Keywords (MUST USE THESE for accuracy)
+- "sits down" -> "lowers body onto chair, weight shifting, legs bending at knees"
+- "walks" -> "steps forward with alternating feet, arms swinging naturally"
+- "runs" -> "legs in running stride, arms pumping, body leaning forward"
+- "looks out" -> "head turned to the side, eyes gazing through window"
+- "pauses" -> "stops mid-stride, one foot slightly raised, frozen in motion"
+- "eats" -> "hand bringing food to mouth, chewing motion"
+- "reads" -> "eyes focused downward on book, head slightly tilted"
 
-## SUBSEQUENT PANELS (2+)
-- In EACH panel, explicitly mention: ID, gender, and outfit (e.g., "[Ryan_001], a woman wearing the same gray hoodie and black leggings, pauses at the bus door...")
-- Focus on ACTION and ENVIRONMENT changes only.
-- Preserve the exact appearance from Panel 1 explicitly by mentioning "wearing the same [outfit description]".
-- Example: "[Ryan_001], a woman wearing the same gray hoodie and black leggings, stops in front of the bus door and leans forward, looking intently at the approaching vehicle."
+## Single-Character Negative Prompt (MUST USE):
+"blurry, distorted, deformed, extra limbs, floating, disconnected body parts, wrong pose, stiff pose, static, wrong outfit color, wrong hairstyle, duplicate character, shadow anomaly, lighting inconsistency"
 
-## STYLE CONSTRAINTS
-- NO quality fluff: ban "masterpiece", "8k", "ultra-realistic", "trending on ArtStation".
-- NO emoji or markdown symbols.
-- Keep language concise: cinematic but simple.
-- The system will prepend a global storyboard style later.
+## Subsequent Panels (2+)
+- Repeat ID + "a [gender] wearing the same [outfit]" EXACTLY
+- Focus on NEW action with specific pose keywords
+- Include environmental changes clearly
+- NEVER change outfit or appearance
 
-# --------------------------
-# SECTION 3: OUTPUT SCHEMA (STRICT JSON)
-# --------------------------
+# ============================
+# RULES FOR MULTI-CHARACTER SCENES (CRITICAL)
+# ============================
 
+## Panel 1: Establishing Shot
+1. List characters in LEFT-TO-RIGHT spatial order as they appear in text order
+2. Use "on the left" / "on the right" / "in the center" for positioning
+3. Each character gets FULL description on Panel 1
+4. Separate characters with "and" in the prompt
+5. CRITICAL: Only include characters that appear in the scene text - do NOT add other characters
+
+## Multi-Character Prompt Template:
+"[Character1_ID], a [gender1] with [hair1] wearing [outfit1], [action1] on the left side, and [Character2_ID], a [gender2] with [hair2] wearing [outfit2], [action2] on the right side, [shared activity or interaction], [clear background], [lighting]"
+
+## Multi-Character Consistency Rules (STRICT):
+1. FIRST describe Character1 completely with ID
+2. THEN describe Character2 completely with DIFFERENT ID
+3. Use VISUAL DISTINGUISHERS: different hair colors, different outfit colors, different body types
+4. NEVER merge characters: use "Character1 on left, Character2 on right" structure
+5. Use "INDIVIDUALLY" keyword if characters do different things simultaneously
+6. Use "TOGETHER" keyword if characters do the same thing together
+
+## Multi-Character Negative Prompt (MUST USE):
+"blurry, distorted, deformed, extra limbs, floating, disconnected body parts, wrong pose, stiff pose, static, wrong outfit color, wrong hairstyle, character blending, merged characters, Siamese twins, shared body parts, confused identity, swapped faces, duplicate character, three people when should be two, solo character when should be two, background character interfering, shadow anomaly, lighting inconsistency"
+
+## Panel 2+ for Multi-Character
+- ALWAYS restate BOTH character IDs and outfits at the start
+- Example: "[Jack_001], a man wearing the same blue shirt and jeans, and [Sara_002], a woman wearing the same white blouse and denim shorts, [new action with positioning]"
+- Use directional cues: "Jack turns to face Sara", "Sara stands beside Jack"
+- If in different environment, still describe both characters clearly
+
+## NEW CHARACTER INTRODUCTION (CRITICAL)
+- **STRICT RULE**: Only describe characters that are EXPLICITLY mentioned in the raw_text
+- Panel 1 text says "<Nina> stands..." -> ONLY describe Nina, do NOT mention Leo
+- Panel 2 text says "She meets <Leo>..." -> Describe Nina (continuing) + Leo (NEW)
+- Panel 3 text says "They look at each other" -> Describe BOTH Nina and Leo
+- If a character is NOT in the current scene's raw_text -> DO NOT include them
+- Example for story "Nina stands in snow. She meets Leo in crowd.":
+  - Panel 1: "[Nina_001], woman, dark brown hair, red coat, black boots, stands alone in snow, cold winter atmosphere."
+  - Panel 2: "[Nina_001], woman, same red coat and black boots, stands in crowd, turns to look, and [Leo_002], man, brown hair, green jacket, approaches from right, both greeting each other."
+  - Panel 3: "[Nina_001], woman, same red coat and black boots, and [Leo_002], man, same green jacket, stand facing each other, quiet moment, eye contact."
+- NEVER fabricate characters that don't appear in the text
+
+# ============================
+# COMMON RULES (ALL SCENES)
+# ============================
+
+## Outfit Consistency
+- Panel 1: FULL outfit description with colors
+- Panel 2+: "wearing the same [color] [garment type]" - use EXACT color words from Panel 1
+- NEVER change colors between panels
+
+## Pose & Action Specificity
+- Use VERBS in present continuous (-ing form)
+- Include body part movements: "arm raised", "head turned", "legs apart"
+- Include facial expression hints: "with a smile", "expression of surprise", "gazing intently"
+
+## Environment & Lighting
+- Panel 1: Rich environment description
+- Panel 2+: Focus on character, mention environment changes
+
+## CLIP Token Limit (CRITICAL)
+- SDXL CLIP encoder limit: 77 tokens
+- Keep prompts under 60 words per panel
+- Put CRITICAL details FIRST: character ID, outfit, main action, pose
+- Put LESS critical details LAST: background, lighting
+- For multi-character: prioritize character descriptions over environment
+- ABBREVIATE when possible: "blue sky" instead of "clear blue sky with fluffy white clouds"
+
+## Forbidden Terms
+- NO: "masterpiece", "8k", "ultra-realistic", "trending", "best quality"
+- NO: Generic terms like "the girl/man" - use IDs only
+- NO: Conflicting outfit descriptions
+
+# ============================
+# OUTPUT SCHEMA (STRICT JSON)
+# ============================
+
+For SINGLE CHARACTER story (keep under 50 words per prompt):
 {
-  "story_id": "02",
+  "story_id": "01",
   "panels": [
     {
       "index": 1,
-      "raw_text": "<Ryan> walks quickly toward a bus.",
-      "expanded_prompt": "[Ryan_001], a woman with short dark hair wearing a gray hoodie, black leggings, and black shoes, walks briskly down the sidewalk towards a red bus stop, early morning light casting shadows on the pavement.",
-      "negative_prompt": "blurry, distorted, multiple people, wrong outfit, gender swap",
+      "raw_text": "<Lily> makes breakfast in the kitchen.",
+      "expanded_prompt": "[Lily_001], woman, blonde ponytail, white blouse, blue jeans, reaches for pan at counter, cracks egg, kitchen, morning light.",
+      "negative_prompt": "blurry, distorted, deformed, extra limbs, floating, wrong pose, stiff, static, wrong outfit, wrong hair, duplicate character",
       "reference_image": null
     },
     {
       "index": 2,
-      "raw_text": "He pauses at the door and looks ahead.",
-      "expanded_prompt": "[Ryan_001], a woman wearing the same gray hoodie and black leggings, stops in front of the bus door and leans forward, looking intently at the approaching vehicle.",
-      "negative_prompt": "blurry, distorted, multiple people, wrong outfit, gender swap",
-      "reference_image": "results/02/panel_1.png"
+      "raw_text": "She looks out the window quietly.",
+      "expanded_prompt": "[Lily_001], woman, same white blouse and blue jeans, stands by window, head turned, gazes outside, quiet expression, hand on sill.",
+      "negative_prompt": "blurry, distorted, deformed, extra limbs, floating, wrong pose, stiff, static, wrong outfit, wrong hair, duplicate character",
+      "reference_image": "results/01/panel_1.png"
+    }
+  ]
+}
+
+For MULTI-CHARACTER story (keep under 55 words per prompt):
+{
+  "story_id": "06",
+  "panels": [
+    {
+      "index": 1,
+      "raw_text": "<Jack> and <Sara> sit in a park and talk.",
+      "expanded_prompt": "[Jack_001], man, brown hair, beard, blue shirt, khaki shorts, sits on left bench, and [Sara_002], woman, blonde wavy hair, white blouse, denim jeans, sits on right bench, talking, park, blue sky.",
+      "negative_prompt": "blurry, distorted, deformed, extra limbs, floating, wrong pose, stiff, static, wrong outfit, wrong hair, character blending, merged, Siamese twins, swapped faces, three people, solo character",
+      "reference_image": null
+    },
+    {
+      "index": 2,
+      "raw_text": "They continue talking in a cafe.",
+      "expanded_prompt": "[Jack_001], man, same blue shirt and khaki shorts, sits at cafe table on left, leans forward, and [Sara_002], woman, same white blouse and denim jeans, sits across on right, holds coffee cup, talking, cafe interior.",
+      "negative_prompt": "blurry, distorted, deformed, extra limbs, floating, wrong pose, stiff, static, wrong outfit, wrong hair, character blending, merged, Siamese twins, swapped faces, three people, solo character",
+      "reference_image": "results/06/panel_1.png"
     }
   ]
 }
 """
 
 def build_user_prompt(default_subject: str, scenes: list) -> str:
-    """Construct User Prompt, force LLM to expand visual details and anchor IDs with gender/outfit"""
+    """Construct User Prompt with enhanced multi-character and action-specific guidance"""
     scene_blocks = []
     for s in scenes:
-        # Preserve original text structure for LLM to parse references
         scene_blocks.append(f"[SCENE-{s['index']}] {s['text']}")
     
     scenes_text = "\n".join(scene_blocks)
+    
+    # Detect multi-character
+    all_text = " ".join([s['text'] for s in scenes])
+    names = re.findall(r'<(\w+)>', all_text)
+    unique_names = list(dict.fromkeys(names))  # Preserve order, remove duplicates
+    is_multi = len(unique_names) > 1
+    char_list = ", ".join([f"<{n}>" for n in unique_names])
+    
+    scene_type_hint = "MULTI-CHARACTER" if is_multi else "SINGLE-CHARACTER"
     
     return f"""
 Input Story Sequence:
 {scenes_text}
 
+## Scene Analysis
+Characters detected: {char_list}
+Scene type: {scene_type_hint}
+Number of scenes: {len(scenes)}
+IMPORTANT: Generate EXACTLY {len(scenes)} panels, one for each scene. Do NOT merge scenes.
+
 ## Processing Instructions
 
-1. CHARACTER INVENTORY: Identify every distinct character (including <{default_subject}> and any new names).
-2. GENDER DETERMINATION: Determine the most likely gender for each character based on context and common knowledge. If uncertain, default to the gender that best fits the name and context.
-3. ID ASSIGNMENT: In Panel 1, assign [Name_001] format IDs. For new characters later, increment the number (e.g., [New_002]).
-4. VISUAL EXPANSION (Panel 1 ONLY): Expand the first scene into a detailed visual prompt including GENDER, HAIR, OUTFIT, ACCESSORIES, and LOCATION specifics.
-5. ACTION FOCUS (Panels 2+): In EACH subsequent panel, explicitly state: ID, gender, and "wearing the same [outfit]" to maintain consistency. Focus on the changed action and camera angle.
-6. PRONOUN REPLACEMENT: Mentally replace all "She/He/They/Her/His" with the correct ID and gender before writing.
-
-Output must be pure JSON following the schema exactly. No commentary.
+1. FIRST determine scene type: SINGLE or MULTI-CHARACTER
+2. For MULTI-CHARACTER: Use LEFT-RIGHT positioning, describe BOTH characters fully in Panel 1
+3. For SINGLE-CHARACTER: Focus on precise pose and action description
+4. CRITICAL: Generate EXACTLY {len(scenes)} panels - one panel per scene
+5. CRITICAL: Use specific action verbs and body part movements in present continuous form
+6. CRITICAL: Use scenario-specific negative prompts (see system prompt)
+7. Outfit colors MUST be identical across all panels
+8. story_id MUST match the input file number
+9. Output pure JSON matching the schema. No commentary outside JSON.
 """
 
 # ============================================================
