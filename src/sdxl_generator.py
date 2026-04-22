@@ -11,8 +11,11 @@ from PIL import Image, ImageFilter, ImageOps
 import logging
 from typing import Optional, Union
 
-# 🔴 关键修复：启用可扩展内存段，对抗显存碎片（基于CUDA文档建议）
+# CRITICAL FIX: Enable expandable memory segments to combat VRAM fragmentation
 os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
+
+# Chinese network mirror for faster downloads
+os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,53 +23,51 @@ logger = logging.getLogger(__name__)
 class SDXLGenerator:
     def __init__(self, model_path: str = None, ip_adapter_path: str = None, device="cuda"):
         """
-        初始化：单管线模式。IP-Adapter和ControlNet绝不预先加载。
+        Initialization: Single pipeline mode. IP-Adapter and ControlNet are NOT preloaded.
         """
         self.device = device
-        self.model_path = model_path or Path(__file__).parent.parent / "models" / "sdxl" / "sd_xl_base_1.0.safetensors"
+        self.model_path = model_path or Path(__file__).parent.parent / "models" / "sdxl"
         self.ip_adapter_path = ip_adapter_path or Path(__file__).parent.parent / "models" / "ip-adapter" / "sdxl_models" / "ip-adapter_sdxl.safetensors"
         
-        print(f"🔄 加载SDXL模型 (单管线节能模式): {self.model_path}")
-        
-        # --- 1. 仅保留一条基础管线 ---
-        self.pipe = StableDiffusionXLPipeline.from_single_file(
-            self.model_path.as_posix(),
+        # --- 1. Load SDXL base model from HuggingFace (China-friendly via HF-Mirror) ---
+        print(f"[SDXL] Loading model from HuggingFace (single pipeline, energy-saving mode)")
+        self.pipe = StableDiffusionXLPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
             torch_dtype=torch.float16,
-            use_safetensors=True,
-            local_files_only=True
+            cache_dir="./models",
+            variant="fp16"
         ).to(self.device)
         self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
 
-        # --- 2. 状态标记（初始均为未加载）---
+        # --- 2. Status flags (all initially unloaded) ---
         self.ip_adapter_loaded = False
         self.controlnet = None
         self.controlnet_loaded = False
-        self.default_control_weight = 0.37  # 平衡控制强度
+        self.default_control_weight = 0.37  # Balanced control strength
 
-        print(f"✅ SDXL 初始化完成。IP/ControlNet 处于休眠状态。")
+        print(f"[SDXL] Initialization complete. IP/ControlNet in sleep mode.")
 
     def _load_ip_adapter_if_needed(self):
-        """仅在需要时加载IP-Adapter，节约显存"""
+        """Load IP-Adapter only when needed, save VRAM"""
         if self.ip_adapter_loaded:
             return
-        print(f"🌙 唤醒加载 IP-Adapter...")
+        print(f"[IP-Adapter] Loading on demand...")
         try:
             self.pipe.load_ip_adapter(
-                self.ip_adapter_path.parent.parent.as_posix(),
+                "h94/IP-Adapter",
                 subfolder="sdxl_models",
-                weight_name=self.ip_adapter_path.name, 
-                local_files_only=True,
+                weight_name="ip-adapter_sdxl.safetensors",
                 torch_dtype=torch.float16
             )
             self.ip_adapter_loaded = True
         except Exception as e:
-            logger.error(f"❌ IP-Adapter 加载失败: {e}")
+            logger.error(f"[ERROR] IP-Adapter loading failed: {e}")
 
     def _load_controlnet_if_needed(self):
-        """仅在需要时加载ControlNet"""
+        """Load ControlNet only when needed"""
         if self.controlnet_loaded:
             return
-        logger.info("🌙 唤醒加载 ControlNet...")
+        logger.info("[ControlNet] Loading on demand...")
         try:
             self.controlnet = ControlNetModel.from_pretrained(
                 "diffusers/controlnet-canny-sdxl-1.0",
@@ -77,29 +78,29 @@ class SDXLGenerator:
             self.pipe.controlnet = self.controlnet
             self.controlnet_loaded = True
         except Exception as e:
-            logger.error(f"❌ ControlNet 加载失败: {e}")
+            logger.error(f"[ERROR] ControlNet loading failed: {e}")
 
     @staticmethod
     def _create_clean_control_image(image: Image.Image, width: int, height: int) -> Image.Image:
         """
-        创建ControlNet控制图：保留背景线条，抹去人物细节。
+        Create ControlNet control image: Keep background edges, remove character details.
         """
-        # 1. 强模糊去噪，弱化人物纹理
+        # 1. Strong blur to denoise, weaken character textures
         gray = image.convert('L')
         blurred = gray.filter(ImageFilter.GaussianBlur(radius=2.5))
-        # 2. 提取边缘
+        # 2. Extract edges
         edge_img = blurred.filter(ImageFilter.FIND_EDGES)
-        # 3. 二值化与去噪
+        # 3. Binarization and denoising
         edge_array = np.array(edge_img)
         binary_array = np.where(edge_array > 100, 250, 50).astype(np.uint8)
         binary_img = Image.fromarray(binary_array)
-        # 4. 形态学去噪 - 修复：使用奇数尺寸 (3)
+        # 4. Morphological denoising - fixed: use odd size (3)
         denoised = binary_img.filter(ImageFilter.MinFilter(size=3))
         smoothed = denoised.filter(ImageFilter.MaxFilter(size=3))
         return smoothed.resize((width, height), Image.Resampling.LANCZOS)
 
     def _prepare_controlnet_input(self, ctrl_ref_image, width: int, height: int) -> Optional[torch.Tensor]:
-        """准备ControlNet输入张量"""
+        """Prepare ControlNet input tensor"""
         try:
             if isinstance(ctrl_ref_image, str) and os.path.exists(ctrl_ref_image):
                 source_img = Image.open(ctrl_ref_image).convert("RGB")
@@ -107,18 +108,18 @@ class SDXLGenerator:
                 source_img = ctrl_ref_image
             source_img = source_img.resize((width, height), Image.Resampling.LANCZOS)
             
-            # 生成控制图
+            # Generate control image
             control_pil = self._create_clean_control_image(source_img, width, height)
             
-            # 转换为Tensor [1, 3, H, W]
+            # Convert to Tensor [1, 3, H, W]
             control_array = np.array(control_pil.convert('L'))
-            control_array = np.stack([control_array] * 3, axis=-1) # 3通道
+            control_array = np.stack([control_array] * 3, axis=-1) # 3 channels
             control_tensor = torch.from_numpy(control_array).float().div(255.0)
             control_tensor = control_tensor.permute(2, 0, 1).unsqueeze(0).to(self.device)
             
             return control_tensor
         except Exception as e:
-            logger.error(f"❌ 控制图生成失败: {e}")
+            logger.error(f"[ERROR] Control image generation failed: {e}")
             return None
 
     def generate_image(
@@ -130,33 +131,33 @@ class SDXLGenerator:
         ip_ref_image: Optional[Union[str, Image.Image]] = None,
         ctrl_ref_image: Optional[Union[str, Image.Image]] = None,
         ctrl_weight: Optional[float] = None,
-        width: int = 992,    # ✅ 992 ÷ 8 = 124 (完美对齐)
-        height: int = 1024,  # ✅ 1024 ÷ 8 = 128
-        num_inference_steps: int = 24,  # 稍减步数保显存
+        width: int = 992,    # 992 / 8 = 124 (perfect alignment)
+        height: int = 1024,  # 1024 / 8 = 128
+        num_inference_steps: int = 24,  # Reduced steps for VRAM savings
         guidance_scale: float = 8.6,
     ) -> bool:
         """
-        显存安全版生成函数。
+        VRAM-safe image generation function.
         """
-        logger.info(f"🎨 生成: {prompt[:55]}...")
+        logger.info(f"[GEN] Generating: {prompt[:55]}...")
         
-        # 初始化变量
+        # Initialize variables
         conditioning_scale = 0.0
         ip_adapter_scale_val = 0.0
         control_image_tensor = None
         final_ip_image = None
         
-        # 🛡️ 负向提示
+        # Negative prompt
         base_neg_prompt = negative_prompt or ""
         base_neg_prompt += ", blurry, distorted, deformed, bad anatomy, extra limbs"
 
         try:
             # =============================================================
-            # 🅰️ 情况 A：首帧生成 (无参考图，最省显存路径)
+            # CASE A: First frame (no reference images, most VRAM-efficient path)
             # =============================================================
             if ip_ref_image is None and ctrl_ref_image is None:
-                print("   🅰️ 轻量模式生成首帧...")
-                # 关键：此时pipe未挂载IP和ControlNet，显存占用最低
+                print("   [MODE-A] Lightweight first frame generation...")
+                # Key: pipe has no IP or ControlNet attached, lowest VRAM usage
                 result = self.pipe(
                     prompt=prompt,
                     negative_prompt=base_neg_prompt,
@@ -167,22 +168,22 @@ class SDXLGenerator:
                 ).images[0]
             
             # =============================================================
-            # 🅱️ 情况 B：后继帧 (动态挂载重量级组件)
+            # CASE B: Subsequent frames (dynamically attach heavy components)
             # =============================================================
             else:
-                print("   🅱️ 增强模式生成...")
+                print("   [MODE-B] Enhanced generation mode...")
                 
-                # --- 1. ControlNet 背景控制 ---
+                # --- 1. ControlNet background control ---
                 if ctrl_ref_image is not None:
                     self._load_controlnet_if_needed()
                     control_image_tensor = self._prepare_controlnet_input(ctrl_ref_image, width, height)
                     conditioning_scale = ctrl_weight or self.default_control_weight
                     if control_image_tensor is not None:
-                        logger.info(f"🎛️  ControlNet 强度: {conditioning_scale:.2f}")
+                        logger.info(f"[ControlNet] Strength: {conditioning_scale:.2f}")
                     else:
-                        logger.warning("⚠️ 控制图生成失败，跳过ControlNet")
+                        logger.warning("[WARN] Control image generation failed, skipping ControlNet")
 
-                # --- 2. IP-Adapter 人物一致 ---
+                # --- 2. IP-Adapter character consistency ---
                 if ip_ref_image is not None:
                     self._load_ip_adapter_if_needed()
                     if isinstance(ip_ref_image, str) and os.path.exists(ip_ref_image):
@@ -190,18 +191,18 @@ class SDXLGenerator:
                         final_ip_image = final_ip_image.resize((width, height), Image.Resampling.LANCZOS)
                     else:
                         final_ip_image = ip_ref_image
-                    # 权重策略
+                    # Weight strategy
                     ip_adapter_scale_val = 0.71 if control_image_tensor is not None else 0.79
-                    logger.info(f"👤 IP-Adapter 强度: {ip_adapter_scale_val:.2f}")
+                    logger.info(f"[IP-Adapter] Strength: {ip_adapter_scale_val:.2f}")
 
-                # --- 3. 叙事增强 ---
+                # --- 3. Narrative enhancement ---
                 enhanced_prompt = prompt
                 if "looks out the window" in prompt.lower():
                     enhanced_prompt += ", side view, gazing out window"
                 if "sits down" in prompt.lower():
                     enhanced_prompt += ", seated, book on table"
 
-                # --- 4. 管线调用 ---
+                # --- 4. Pipeline call ---
                 call_kwargs = {
                     "prompt": enhanced_prompt,
                     "negative_prompt": base_neg_prompt,
@@ -210,7 +211,7 @@ class SDXLGenerator:
                     "num_inference_steps": num_inference_steps,
                     "guidance_scale": guidance_scale,
                 }
-                # 注入条件
+                # Inject conditions
                 if control_image_tensor is not None:
                     call_kwargs["image"] = control_image_tensor
                     call_kwargs["controlnet_conditioning_scale"] = conditioning_scale
@@ -220,20 +221,20 @@ class SDXLGenerator:
 
                 result = self.pipe(**call_kwargs).images[0]
                 
-                # 🔴 显存救急：立即释放大张量
+                # EMERGENCY VRAM RELEASE: Immediately free large tensors
                 if control_image_tensor is not None:
                     del control_image_tensor
 
-            # --- 5. 保存结果 ---
+            # --- 5. Save result ---
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             result.save(output_path)
-            logger.info(f"💾 已保存: {output_path}")
+            logger.info(f"[SAVE] Image saved: {output_path}")
             return True
 
         except torch.cuda.OutOfMemoryError:
-            logger.error("💥 CUDA OOM！建议：1) 重启终端清空显存 2) 降低分辨率至896x832")
+            logger.error("[OOM] CUDA Out of Memory! Suggestion: 1) Restart terminal to clear VRAM 2) Lower resolution to 896x832")
             torch.cuda.empty_cache()
             return False
         except Exception as e:
-            logger.exception(f"❌ 生成失败: {str(e)[:120]}")
+            logger.exception(f"[ERROR] Generation failed: {str(e)[:120]}")
             return False

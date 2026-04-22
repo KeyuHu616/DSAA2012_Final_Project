@@ -2,12 +2,12 @@
 """
 llm_processor.py
 ================
-重构版：将多角色识别与一致性锚定完全交由LLM处理，废除代码级代词替换。
-核心策略：
-1. 保留输入中的所有代词与标签（<Lily>, She/Her），由LLM解析指代关系
-2. 强制LLM在首帧定义角色ID（[Lily_001]），后续帧严格复用
-3. 若出现新角色，要求LLM显式分配新ID并标记
-4. 输出端保持路径注入与JSON Schema不变
+Refactored: Character recognition and consistency anchoring delegated entirely to LLM.
+Core Strategy:
+1. Keep all pronouns and tags (<Lily>, She/Her), let LLM resolve references
+2. Force LLM to define character IDs ([Lily_001]) in first frame, strictly reuse in subsequent
+3. For new characters, require LLM to assign new IDs explicitly
+4. Output maintains path injection and JSON Schema
 """
 
 import argparse
@@ -17,14 +17,17 @@ import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# Chinese network mirror configuration for HuggingFace models
+os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+
 # ============================================================
-# 1. 输入解析（废除代词替换）
+# Section 1: Input Parsing (Pronoun replacement removed)
 # ============================================================
 
 def parse_raw_input(raw_text: str) -> dict:
     """
-    解析原始输入，保留所有代词与标签，不做任何文本替换。
-    仅提取第一帧<Name>作为默认主体名（用于提示词构建，不用于修改文本）。
+    Parse raw input, preserve all pronouns and tags, no text replacement.
+    Extract first frame <Name> as default subject name (for prompt construction only).
     """
     blocks = re.split(r'\[SEP\]', raw_text, flags=re.IGNORECASE)
     blocks = [b.strip() for b in blocks if b.strip()]
@@ -33,10 +36,10 @@ def parse_raw_input(raw_text: str) -> dict:
     default_subject = None
 
     for i, block in enumerate(blocks):
-        # 移除[SCENE-N]标记，保留原始文本（含<Lily>和She/Her）
+        # Remove [SCENE-N] markers, preserve original text (with <Lily> and She/Her)
         text = re.sub(r'\[SCENE-\d+\]\s*', '', block).strip()
         
-        # 仅在第一帧尝试提取<Name>作为默认主体名（用于提示词上下文）
+        # Only extract <Name> from first frame as default subject (for prompt context)
         if i == 0:
             name_match = re.search(r'<(\w+)>', text)
             if name_match:
@@ -47,15 +50,15 @@ def parse_raw_input(raw_text: str) -> dict:
     if default_subject is None:
         default_subject = "Subject"
 
-    # 🔴 修复点1：保持向后兼容，同时返回两个键
+    # Backward compatibility: return both keys
     return {
-        "subject_name": default_subject,  # 为pipeline_runner.py保持兼容
-        "default_subject": default_subject,  # 新接口
+        "subject_name": default_subject,  # For pipeline_runner.py compatibility
+        "default_subject": default_subject,  # New interface
         "scenes": scenes
     }
 
 # ============================================================
-# 2. 重构LLM Prompt（强制视觉展开 + 角色ID锚定 + 性别与着装一致性）
+# Section 2: LLM Prompt (Visual expansion + Character ID anchoring + Gender/Outfit consistency)
 # ============================================================
 
 SYSTEM_PROMPT = r"""You are a professional storyboard artist for animated films. Your task is to convert simple scene descriptions into detailed, consistent visual prompts.
@@ -133,10 +136,10 @@ SYSTEM_PROMPT = r"""You are a professional storyboard artist for animated films.
 """
 
 def build_user_prompt(default_subject: str, scenes: list) -> str:
-    """构造User Prompt，强制LLM展开视觉细节并锚定ID，明确性别与着装"""
+    """Construct User Prompt, force LLM to expand visual details and anchor IDs with gender/outfit"""
     scene_blocks = []
     for s in scenes:
-        # 保留原始文本结构，供LLM解析指代
+        # Preserve original text structure for LLM to parse references
         scene_blocks.append(f"[SCENE-{s['index']}] {s['text']}")
     
     scenes_text = "\n".join(scene_blocks)
@@ -157,28 +160,36 @@ Input Story Sequence:
 Output must be pure JSON following the schema exactly. No commentary.
 """
 
-
-
 # ============================================================
-# 3. LLM 加载与推理（保持不变）
+# Section 3: LLM Loading and Inference (China-friendly with HF-Mirror)
 # ============================================================
 
 def load_llm(llm_path: str):
-    print(f"📦 Loading LLM from {llm_path} ...")
-    tokenizer = AutoTokenizer.from_pretrained(llm_path)
+    """
+    Load LLM from local path or HuggingFace (via HF-Mirror).
+    Mirrors ControlNet/SDXL loading pattern for consistency.
+    """
+    print(f"[LLM] Loading model (auto-cache via HF-Mirror): {llm_path}")
+    
+    tokenizer = AutoTokenizer.from_pretrained(
+        llm_path,
+        trust_remote_code=True,
+        cache_dir="./models",
+    )
     model = AutoModelForCausalLM.from_pretrained(
         llm_path,
         torch_dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
+        cache_dir="./models",
     )
     model.eval()
-    print("✅ LLM loaded.")
+    print("[LLM] Model loaded successfully.")
     return tokenizer, model
 
 def run_llm_inference(tokenizer, model, system_prompt: str, user_prompt: str,
                       max_new_tokens: int = 4096) -> str:
-    """Qwen2.5 ChatML格式推理"""
+    """Qwen2.5 ChatML format inference"""
     full_prompt = (
         f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
         f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
@@ -200,16 +211,16 @@ def run_llm_inference(tokenizer, model, system_prompt: str, user_prompt: str,
 
 
 # ============================================================
-# 4. JSON 解析与后处理（路径注入保持不变）
+# Section 4: JSON Parsing and Post-processing (Path injection unchanged)
 # ============================================================
 
 def parse_llm_output(raw_output: str) -> dict:
-    """从LLM输出中提取JSON"""
-    # 移除可能的Markdown代码块
+    """Extract JSON from LLM output"""
+    # Remove possible Markdown code blocks
     cleaned = re.sub(r'^```(?:json)?\s*', '', raw_output, flags=re.MULTILINE)
     cleaned = re.sub(r'```\s*$', '', cleaned, flags=re.MULTILINE).strip()
 
-    # 提取首个完整JSON对象
+    # Extract first complete JSON object
     brace_start = cleaned.find('{')
     brace_end = cleaned.rfind('}')
     if brace_start != -1 and brace_end != -1:
@@ -220,21 +231,21 @@ def parse_llm_output(raw_output: str) -> dict:
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
-        print(f"⚠️ JSON解析失败: {e}")
+        print(f"[WARN] JSON parsing failed: {e}")
         with open("llm_debug.txt", "w", encoding="utf-8") as f:
             f.write(f"Raw output:\n{raw_output}\n\nCleaned:\n{cleaned}")
-        print("原始输出已保存至 llm_debug.txt")
+        print("[DEBUG] Raw output saved to llm_debug.txt")
         return None
 
 def derive_story_id(input_path: str) -> str:
-    """从文件名提取数字ID"""
+    """Extract numeric ID from filename"""
     stem = os.path.splitext(os.path.basename(input_path))[0]
     m = re.search(r'\d+', stem)
     return m.group(0) if m else stem
 
 def post_process(data: dict, story_id: str, results_root: str, raw_scenes: list) -> dict:
     """
-    后处理：注入ID、路径，并强制对齐原始Raw Text（防LLM改写历史）
+    Post-processing: Inject IDs, paths, and force alignment with original Raw Text.
     """
     data["story_id"] = story_id
     panels = data.get("panels", [])
@@ -242,11 +253,11 @@ def post_process(data: dict, story_id: str, results_root: str, raw_scenes: list)
 
     for p in panels:
         idx = p["index"]
-        # 强制还原原始Raw Text（保持输入真实性）
+        # Force restore original Raw Text (maintain input authenticity)
         if idx in raw_text_map:
             p["raw_text"] = raw_text_map[idx]
         
-        # 注入Reference路径（Panel 1无参考，Panel N参考N-1）
+        # Inject reference paths (Panel 1 has no reference, Panel N references N-1)
         if idx == 1:
             p["reference_image"] = None
         else:
@@ -257,53 +268,53 @@ def post_process(data: dict, story_id: str, results_root: str, raw_scenes: list)
 
 
 # ============================================================
-# 5. 主流程
+# Section 5: Main Process
 # ============================================================
 
 def process(input_path: str, output_path: str, llm_path: str, results_root: str = "results"):
     with open(input_path, "r", encoding="utf-8") as f:
         raw_text = f.read()
 
-    print(f"📖 解析输入: {input_path}")
+    print(f"[INPUT] Parsing: {input_path}")
     parsed = parse_raw_input(raw_text)
     story_id = derive_story_id(input_path)
     
-    # 🔴 修复点2：输出日志时使用兼容的键名
-    print(f"   StoryID: {story_id}, 主体: {parsed['subject_name']}, 共{len(parsed['scenes'])}帧")
+    # Use compatible key name for logging
+    print(f"[INPUT] StoryID: {story_id}, Subject: {parsed['subject_name']}, Frames: {len(parsed['scenes'])}")
     for s in parsed["scenes"]:
-        print(f"     [SCENE-{s['index']}] {s['text']}")
+        print(f"  [SCENE-{s['index']}] {s['text']}")
 
-    # 加载LLM
+    # Load LLM
     tokenizer, model = load_llm(llm_path)
     
-    # 构建提示词
+    # Build prompt
     user_prompt = build_user_prompt(parsed["default_subject"], parsed["scenes"])
-    print("\n🧠 Running LLM inference (角色ID锚定模式)...")
+    print("\n[LLM] Running inference (Character ID anchoring mode)...")
     
     raw_output = run_llm_inference(tokenizer, model, SYSTEM_PROMPT, user_prompt)
     data = parse_llm_output(raw_output)
     
     if data is None:
-        print("❌ LLM输出解析失败，终止流程")
+        print("[ERROR] LLM output parsing failed, aborting")
         return None
 
-    # 后处理注入
+    # Post-processing injection
     data = post_process(data, story_id, results_root, parsed["scenes"])
     
-    # 保存JSON
+    # Save JSON
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         
-    print(f"\n💾 已保存结构化JSON: {output_path}")
+    print(f"\n[OUTPUT] JSON saved: {output_path}")
     return data
 
 def main():
-    parser = argparse.ArgumentParser(description="重构版LLM Processor：角色ID锚定")
-    parser.add_argument("--input", type=str, required=True, help="输入.txt路径")
-    parser.add_argument("--output", type=str, required=True, help="输出JSON路径")
-    parser.add_argument("--llm_path", type=str, default="./models/llm/Qwen2.5-7B-Instruct")
-    parser.add_argument("--results_root", type=str, default="results", help="图片输出根目录")
+    parser = argparse.ArgumentParser(description="Refactored LLM Processor with Character ID Anchoring")
+    parser.add_argument("--input", type=str, required=True, help="Input .txt file path")
+    parser.add_argument("--output", type=str, required=True, help="Output JSON path")
+    parser.add_argument("--llm_path", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="LLM model repo_id or local path")
+    parser.add_argument("--results_root", type=str, default="results", help="Image output root directory")
     args = parser.parse_args()
     
     process(args.input, args.output, args.llm_path, args.results_root)
