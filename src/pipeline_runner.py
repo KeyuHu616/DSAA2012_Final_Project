@@ -1,190 +1,416 @@
-#!/usr/bin/env python3
 """
-enhanced_pipeline_runner.py
-Refactored Pipeline Runner: Drives LLM+SDXL to generate story images from .txt input,
-supports JSON intermediate file persistence.
-Usage:
-    python enhanced_pipeline_runner.py \
-        --input data/TaskA/01.txt \
-        --llm_path ./models/Qwen2.5-7B-Instruct \
-        --save_json
+Pipeline Runner Module - White-Box Story Pipeline Orchestrator
+
+Main orchestrator that coordinates:
+1. LLM semantic decoupling (llm_processor)
+2. White-box SDXL generation with MSA/CSA (sdxl_generator)
+3. Best-of-N evaluation and selection (evaluator)
+
+Author: White-Box Story Pipeline Team
+Date: 2026-04-24
 """
 
-import argparse
-import json
 import os
-import sys
+import json
+import torch
 from pathlib import Path
+from typing import Optional, List, Dict
+from PIL import Image
+import time
+from dataclasses import dataclass
 
-from llm_processor import parse_raw_input, derive_story_id, load_llm, run_llm_inference, parse_llm_output, post_process
-from sdxl_generator import SDXLGenerator
+from llm_processor import LLMProcessor, StoryData, Character, Frame
+from sdxl_generator import WhiteBoxSDXLGenerator, ConsistencyConfig
+from evaluator import StoryEvaluator, SimpleEvaluator
 
 
-class EnhancedPipelineRunner:
-    def __init__(self, llm_path: str, sdxl_model_path: str, ip_adapter_path: str, results_root: str = "results"):
-        self.llm_path = llm_path
-        self.sdxl_model_path = sdxl_model_path
-        self.ip_adapter_path = ip_adapter_path
-        self.results_root = Path(results_root)
-        
-        # Lazy initialization
-        self.llm_tokenizer = None
-        self.llm_model = None
-        self.sdxl_gen = None
+# ============================================================================
+# PIPELINE CONFIGURATION
+# ============================================================================
+
+@dataclass
+class PipelineConfig:
+    """Configuration for the story pipeline."""
+    model_path: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    llm_path: str = "Qwen/Qwen2.5-7B-Instruct"
+    cache_dir: str = "./models"
+    output_dir: str = "./results"
     
-    def init_llm(self):
-        """Lazy load LLM"""
-        if self.llm_tokenizer is None or self.llm_model is None:
-            self.llm_tokenizer, self.llm_model = load_llm(self.llm_path)
+    height: int = 832
+    width: int = 896
+    num_inference_steps: int = 24
+    guidance_scale: float = 8.6
+    base_seed: int = 42
+    n_candidates: int = 2
     
-    def init_sdxl(self):
-        """Lazy load SDXL"""
-        if self.sdxl_gen is None:
-            self.sdxl_gen = SDXLGenerator(self.sdxl_model_path, self.ip_adapter_path)
+    share_step_ratio: float = 0.5
+    msa_inject_scale: float = 0.35
     
-    def run_from_txt(self, input_txt_path: str, save_json: bool = False) -> bool:
-        """
-        Run full pipeline from txt file.
-        Args:
-            input_txt_path: Input .txt scene description file
-            save_json: Whether to save LLM output JSON to disk
-        Returns: Whether all generations succeeded
-        """
-        input_path = Path(input_txt_path)
-        if not input_path.exists():
-            raise FileNotFoundError(f"Input file not found: {input_txt_path}")
+    use_evaluator: bool = True
+    use_aesthetic: bool = False
+    eval_weights: Optional[Dict] = None
+    
+    low_vram_mode: bool = True
+    max_characters: int = 2
+    
+    def __post_init__(self):
+        if self.eval_weights is None:
+            self.eval_weights = {"dino": 0.40, "clip": 0.35, "aesthetic": 0.25}
+
+
+# ============================================================================
+# MAIN PIPELINE CLASS
+# ============================================================================
+
+class WhiteBoxStoryPipeline:
+    """
+    Main orchestrator for the White-Box Story Pipeline.
+    
+    Coordinates LLM processing, SDXL generation, and evaluation.
+    """
+    
+    def __init__(self, config: Optional[PipelineConfig] = None):
+        self.config = config or PipelineConfig()
+        self.llm: Optional[LLMProcessor] = None
+        self.generator: Optional[WhiteBoxSDXLGenerator] = None
+        self.evaluator = None
+        self.is_initialized = False
+        self.current_story_data = None
+
+    def initialize(self):
+        """Initialize all components."""
+        if self.is_initialized:
+            return
         
-        # === Phase 1: LLM parses txt to structured JSON ===
-        print(f"\n[INPUT] Parsing: {input_path}")
-        with open(input_path, "r", encoding="utf-8") as f:
-            raw_text = f.read()
+        print("=" * 60)
+        print("Initializing White-Box Story Pipeline")
+        print("=" * 60)
         
-        parsed_info = parse_raw_input(raw_text)
-        story_id = derive_story_id(str(input_path))
-        print(f"   StoryID: {story_id}, Subject: {parsed_info['subject_name']}, Frames: {len(parsed_info['scenes'])}")
+        consistency_config = ConsistencyConfig(
+            share_step_ratio=self.config.share_step_ratio,
+            msa_inject_scale=self.config.msa_inject_scale,
+            enable_shared_attention=True,
+            enable_msa=True
+        )
         
-        # Construct LLM prompt (reuse llm_processor functions)
-        from llm_processor import build_user_prompt, SYSTEM_PROMPT
-        user_prompt = build_user_prompt(parsed_info["subject_name"], parsed_info["scenes"])
+        # LLM Processor
+        print("\n[Pipeline] Initializing LLM Processor...")
+        try:
+            self.llm = LLMProcessor(model_path=self.config.llm_path, device="cuda")
+            print("[Pipeline] LLM ready")
+        except Exception as e:
+            print(f"[Pipeline] LLM init failed: {e}")
+            self.llm = None
         
-        print("[LLM] Running inference...")
-        self.init_llm()
-        llm_raw_out = run_llm_inference(self.llm_tokenizer, self.llm_model, SYSTEM_PROMPT, user_prompt)
+        # SDXL Generator
+        print("\n[Pipeline] Initializing SDXL Generator...")
+        try:
+            self.generator = WhiteBoxSDXLGenerator(
+                model_path=self.config.model_path,
+                device="cuda",
+                consistency_config=consistency_config
+            )
+            self.generator.load_components(low_vram_mode=self.config.low_vram_mode)
+            print("[Pipeline] SDXL ready")
+        except Exception as e:
+            print(f"[Pipeline] SDXL init failed: {e}")
+            raise RuntimeError(f"SDXL initialization failed: {e}")
         
-        story_data = parse_llm_output(llm_raw_out)
-        if story_data is None:
-            print("[ERROR] LLM output parsing failed")
+        # Evaluator
+        if self.config.use_evaluator:
+            print("\n[Pipeline] Initializing Evaluator...")
+            try:
+                eval_class = StoryEvaluator if self.config.use_aesthetic else SimpleEvaluator
+                self.evaluator = eval_class(weights=self.config.eval_weights)
+                print("[Pipeline] Evaluator ready")
+            except Exception as e:
+                print(f"[Pipeline] Evaluator init failed: {e}")
+                self.evaluator = None
+        else:
+            self.evaluator = None
+        
+        self.is_initialized = True
+        print("\n" + "=" * 60)
+        print("Pipeline initialized!")
+        print("=" * 60)
+
+    def run(self, input_path: str, story_id: Optional[str] = None) -> bool:
+        """Run complete pipeline on an input story file."""
+        if not self.is_initialized:
+            self.initialize()
+        
+        start_time = time.time()
+        story_id = story_id or Path(input_path).stem
+        
+        print(f"\n{'='*60}")
+        print(f"Running Pipeline: {story_id}")
+        print(f"{'='*60}")
+        
+        # Setup output
+        output_dir = os.path.join(self.config.output_dir, story_id)
+        os.makedirs(output_dir, exist_ok=True)
+        json_dir = os.path.join(self.config.output_dir, "json_data")
+        os.makedirs(json_dir, exist_ok=True)
+        
+        # Step 1: LLM semantic decoupling
+        print("\n[Step 1/4] LLM Semantic Decoupling...")
+        try:
+            if self.llm is not None:
+                story_data = self.llm.process(input_path)
+            else:
+                story_data = self._simple_parse(input_path, story_id)
+        except Exception as e:
+            print(f"[Pipeline] LLM failed: {e}")
+            story_data = self._simple_parse(input_path, story_id)
+        
+        self.current_story_data = story_data
+        
+        # Save parsed JSON
+        json_path = os.path.join(json_dir, f"data{story_id}.json")
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(story_data.to_dict(), f, indent=2, ensure_ascii=False)
+        print(f"[Saved] JSON: {json_path}")
+        
+        characters = story_data.characters
+        frames = story_data.frames
+        
+        if not characters or not frames:
+            print("[Pipeline] FATAL: No characters or frames")
             return False
         
-        # Post-processing: inject real paths and correct raw_text
-        story_data = post_process(story_data, story_id, str(self.results_root), parsed_info["scenes"])
+        primary_char = characters[0]
+        char_prompt = primary_char.global_prompt
+        print(f"\n[Character] {primary_char.id}: {char_prompt}")
         
-        # Optional JSON save
-        if save_json:
-            json_dir = self.results_root / "json_data"
-            json_dir.mkdir(parents=True, exist_ok=True)
-            json_path = json_dir / f"data{story_id.zfill(2)}.json"
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(story_data, f, indent=2, ensure_ascii=False)
-            print(f"[JSON] Saved: {json_path}")
+        # Step 2: Generate first frame
+        print("\n[Step 2/4] Generating First Frame...")
+        frame1_data = frames[0]
         
-        # === Phase 2: SDXL generates images frame by frame ===
-        print(f"\n[SDXL] Starting story generation: {story_id}...")
-        self.init_sdxl()
-        panels = story_data["panels"]
-        
-        for panel in sorted(panels, key=lambda x: x["index"]):  # Sort by index for order
-            success = self._generate_panel(panel, story_id)
-            if not success:
-                print(f"[STOP] Panel {panel['index']} generation failed, aborting")
-                return False
-        
-        print(f"[DONE] Story {story_id} complete! Output: {self.results_root / story_id}")
-        return True
-    
-    def _generate_panel(self, panel: dict, story_id: str) -> bool:
-        idx = panel["index"]
-        prompt = panel["expanded_prompt"]
-        neg_prompt = panel["negative_prompt"]
-
-        # Calculate output path
-        out_dir = self.results_root / story_id
-        out_path = out_dir / f"panel_{idx}.png"
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        # Global style prefix
-        GLOBAL_STYLE = "Clean storyboard-style digital illustration, soft ink outlines, flat-wash color fills, mild cel-shading, warm and approachable color palette, 2d art style"
-        full_prompt = f"{GLOBAL_STYLE}, {prompt}"
-
-        print(f"\n[GENERATING] Panel {idx}: {prompt[:40]}...")
-
-        # ========== First frame processing ==========
-        if idx == 1:
-            print("   [MODE] First frame (no reference)")
-            success = self.sdxl_gen.generate_image(
-                prompt=full_prompt,
-                output_path=str(out_path),
-                negative_prompt=neg_prompt,
-                ip_ref_image=None,
-                ctrl_ref_image=None
+        try:
+            frame1_img = self.generator.generate_single_frame(
+                prompt=frame1_data.full_prompt,
+                char_prompt=char_prompt,
+                neg_prompt=frame1_data.negative_prompt,
+                height=self.config.height,
+                width=self.config.width,
+                num_steps=self.config.num_inference_steps,
+                guidance=self.config.guidance_scale,
+                seed=self.config.base_seed
             )
             
-            # After first frame generation, derive ControlNet control image
-            if success and out_path.exists():
-                control_path = out_dir / f"panel_{idx}_control.png"
-                try:
-                    from PIL import Image, ImageFilter
-                    img = Image.open(out_path).convert("RGB")
-                    img = img.resize((1024, 1024), Image.Resampling.LANCZOS)
-                    edges = img.filter(ImageFilter.FIND_EDGES)
-                    edges.save(control_path)
-                    print(f"[CONTROL] Control image generated: {control_path.name}")
-                except Exception as e:
-                    print(f"[WARN] Control image generation failed: {e}")
-            return success
+            frame1_path = os.path.join(output_dir, f"panel_{frame1_data.index:02d}.png")
+            frame1_img.save(frame1_path)
+            print(f"[Saved] Frame 1: {frame1_path}")
+            
+            prev_best_img = frame1_img
+        except Exception as e:
+            print(f"[Pipeline] Frame 1 failed: {e}")
+            return False
+        
+        # Step 3: Generate subsequent frames
+        print("\n[Step 3/4] Generating Subsequent Frames...")
+        generated_frames = [frame1_img]
+        
+        for i, frame_data in enumerate(frames[1:], start=2):
+            print(f"\n--- Frame {i}/{len(frames)} ---")
+            
+            try:
+                candidates = self.generator.generate_with_consistency(
+                    prompt=frame_data.full_prompt,
+                    char_prompt=char_prompt,
+                    neg_prompt=frame_data.negative_prompt,
+                    height=self.config.height,
+                    width=self.config.width,
+                    num_steps=self.config.num_inference_steps,
+                    guidance=self.config.guidance_scale,
+                    seed=self.config.base_seed + i * 100,
+                    frame_index=i,
+                    n_candidates=self.config.n_candidates
+                )
+                
+                # Select best
+                if self.evaluator and len(candidates) > 1:
+                    best_idx, scores = self.evaluator.evaluate_candidates(
+                        candidates=candidates,
+                        prev_best_img=prev_best_img,
+                        current_prompt=frame_data.full_prompt
+                    )
+                    selected_img = candidates[best_idx]
+                else:
+                    selected_img = candidates[0]
+                    best_idx = 0
+                
+                frame_path = os.path.join(output_dir, f"panel_{frame_data.index:02d}.png")
+                selected_img.save(frame_path)
+                print(f"[Saved] Frame {i}: {frame_path}")
+                
+                generated_frames.append(selected_img)
+                prev_best_img = selected_img
+                
+                if i % 5 == 0:
+                    self.generator.clear_cache()
+                
+            except Exception as e:
+                print(f"[Pipeline] Frame {i} failed: {e}")
+                continue
+        
+        # Step 4: Save summary
+        print("\n[Step 4/4] Saving Summary...")
+        
+        elapsed = time.time() - start_time
+        summary = {
+            "story_id": story_id,
+            "total_frames": len(frames),
+            "generated_frames": len(generated_frames),
+            "character": primary_char.to_dict(),
+            "config": {
+                "height": self.config.height,
+                "width": self.config.width,
+                "num_steps": self.config.num_inference_steps,
+                "n_candidates": self.config.n_candidates,
+                "share_step_ratio": self.config.share_step_ratio,
+                "msa_inject_scale": self.config.msa_inject_scale
+            },
+            "timing": {"total_seconds": elapsed, "seconds_per_frame": elapsed / len(frames) if frames else 0}
+        }
+        
+        with open(os.path.join(output_dir, "summary.json"), 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        print(f"\n{'='*60}")
+        print(f"Complete: {story_id} - {len(generated_frames)}/{len(frames)} frames - {elapsed:.1f}s")
+        print(f"{'='*60}")
+        
+        return True
 
-        # ========== Subsequent frame processing ==========
-        else:
-            print("   [MODE] Sequential frame (IP+ControlNet)")
-            ip_ref_path = out_dir / f"panel_{idx-1}.png"       # IP: previous frame
-            ctrl_ref_path = out_dir / "panel_1_control.png"    # Control: first frame edges
+    def _simple_parse(self, input_path: str, story_id: str) -> StoryData:
+        """Simple fallback parser without LLM."""
+        print("[Pipeline] Using simple fallback parser")
+        
+        with open(input_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        
+        import re
+        scenes = re.split(r'\[SCENE-\d+\]|\[SEP\]', text)
+        
+        frames = []
+        for i, scene in enumerate(scenes):
+            scene = scene.strip()
+            if len(scene) > 5:
+                frames.append(Frame(
+                    index=i + 1,
+                    action=scene[:200],
+                    background="indoor scene",
+                    expression="neutral",
+                    camera_angle="medium shot",
+                    mood="natural",
+                    negative_prompt="blurry, distorted, deformed"
+                ))
+        
+        char = Character(
+            id="CHAR_001", name="Character", gender="person",
+            appearance={"hair": "short hair", "build": "average", "skin_tone": "medium"},
+            outfit="casual clothing",
+            signature_feature="casual appearance",
+            global_prompt="a person with short hair wearing casual clothing"
+        )
+        
+        story = StoryData(story_id=story_id, global_style="clean illustration", characters=[char], frames=frames)
+        story.assemble_all_prompts()
+        return story
 
-            # Defensive checks
-            if not ip_ref_path.exists():
-                print(f"[WARN] IP reference missing: {ip_ref_path}, falling back to text-only generation")
-                ip_ref_path = None
-            if not ctrl_ref_path.exists():
-                print(f"[WARN] Control image missing: {ctrl_ref_path}, ControlNet will be disabled")
-                ctrl_ref_path = None
+    def cleanup(self):
+        """Release resources."""
+        if self.generator:
+            self.generator.clear_cache()
+        torch.cuda.empty_cache()
 
-            return self.sdxl_gen.generate_image(
-                prompt=full_prompt,
-                output_path=str(out_path),
-                negative_prompt=neg_prompt,
-                ip_ref_image=str(ip_ref_path) if ip_ref_path else None,
-                ctrl_ref_image=str(ctrl_ref_path) if ctrl_ref_path else None
-            )
+
+# ============================================================================
+# BATCH PROCESSOR
+# ============================================================================
+
+class BatchProcessor:
+    """Process multiple stories in batch."""
+    
+    def __init__(self, config: Optional[PipelineConfig] = None):
+        self.config = config or PipelineConfig()
+        self.pipeline = WhiteBoxStoryPipeline(self.config)
+        
+    def process_directory(self, input_dir: str, pattern: str = "*.txt") -> Dict[str, bool]:
+        """Process all TXT files in a directory."""
+        input_path = Path(input_dir)
+        files = sorted(input_path.glob(pattern))
+        
+        print(f"\n{'='*60}")
+        print(f"Batch Processing: {len(files)} files")
+        print(f"{'='*60}")
+        
+        results = {}
+        self.pipeline.initialize()
+        
+        for file_path in files:
+            story_id = file_path.stem
+            print(f"\n{'='*60}")
+            print(f"Processing: {story_id}")
+            print(f"{'='*60}")
+            
+            try:
+                success = self.pipeline.run(str(file_path), story_id)
+                results[story_id] = success
+            except Exception as e:
+                print(f"[Batch] FAILED: {e}")
+                results[story_id] = False
+            
+            self.pipeline.cleanup()
+            import gc
+            gc.collect()
+        
+        success_count = sum(1 for v in results.values() if v)
+        print(f"\n{'='*60}")
+        print(f"Batch Complete: {success_count}/{len(files)} successful")
+        print(f"{'='*60}")
+        
+        return results
+
+
+# ============================================================================
+# CLI ENTRY POINT
+# ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Enhanced Pipeline: Generate story images from txt")
-    parser.add_argument("--input", type=str, required=True, help="Input .txt scene file path")
-    parser.add_argument("--llm_path", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="LLM model repo_id or local path")
-    parser.add_argument("--sdxl_model", type=str, default="", help="SDXL model path")
-    parser.add_argument("--ip_adapter", type=str, default="", help="IP-Adapter model path")
-    parser.add_argument("--results_root", type=str, default="results", help="Image output root directory")
-    parser.add_argument("--save_json", action="store_true", help="Save intermediate LLM JSON")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="White-Box Story Pipeline")
+    parser.add_argument("input", help="Input TXT file or directory")
+    parser.add_argument("--output", "-o", default="./results", help="Output directory")
+    parser.add_argument("--model", "-m", default="stabilityai/stable-diffusion-xl-base-1.0")
+    parser.add_argument("--llm", "-l", default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--steps", "-s", type=int, default=24)
+    parser.add_argument("--candidates", "-n", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-eval", action="store_true")
+    parser.add_argument("--batch", action="store_true")
     
     args = parser.parse_args()
     
-    runner = EnhancedPipelineRunner(
-        llm_path=args.llm_path,
-        sdxl_model_path=args.sdxl_model,
-        ip_adapter_path=args.ip_adapter,
-        results_root=args.results_root
+    config = PipelineConfig(
+        model_path=args.model, llm_path=args.llm, output_dir=args.output,
+        num_inference_steps=args.steps, base_seed=args.seed,
+        n_candidates=args.candidates, use_evaluator=not args.no_eval
     )
     
-    success = runner.run_from_txt(args.input, args.save_json)
-    sys.exit(0 if success else 1)
+    if args.batch:
+        processor = BatchProcessor(config)
+        results = processor.process_directory(args.input)
+        with open(os.path.join(args.output, "batch_results.json"), 'w') as f:
+            json.dump(results, f, indent=2)
+    else:
+        pipeline = WhiteBoxStoryPipeline(config)
+        success = pipeline.run(args.input)
+        if not success:
+            print("\n[Pipeline] FAILED")
+            exit(1)
 
 
 if __name__ == "__main__":

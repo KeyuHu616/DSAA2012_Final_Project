@@ -1,17 +1,50 @@
-name: storygen
+# White-Box Story Pipeline - Conda Environment
+# Usage: conda env create -f environment.yml
+#        conda activate story-pipeline
+
+name: story-pipeline
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - defaults
-  - https://repo.anaconda.com/pkgs/main
-  - https://repo.anaconda.com/pkgs/r
+
 dependencies:
-  - python=3.11
-  - pytorch
-  - torchvision
-  - opencv
-  - transformers=4.39.3
-  - huggingface_hub=0.24.6
-  - accelerate=0.33.0
-  - diffusers=0.26.0
-  - aria2
-  - git-lfs
+  # Python
+  - python=3.10
+  - pip>=23.0
+
+  # Core ML
+  - pytorch>=2.0.0
+  - torchvision>=0.15.0
+  - cuda-toolkit=11.8  # Adjust for your GPU
+
+  # Scientific computing
+  - numpy>=1.24.0
+  - scipy>=1.11.0
+  - pillow>=9.0.0
+  - scikit-image>=0.21.0
+
+  # NLP/Transformers
+  - transformers>=4.36.0
+  - accelerate>=0.25.0
+  - safetensors>=0.4.0
+
+  # Diffusion models
+  - diffusers>=0.25.0
+
+  # Utilities
+  - tqdm>=4.65.0
+  - pyyaml>=6.0.0
+
+  # Optional optimization
+  # - xformers>=0.0.23
+
+  # Pip-only packages (not available in conda)
+  - pip:
+    - clip-retrieval>=1.0.0
+
+variables:
+  # HuggingFace cache
+  HF_HOME: "./models"
+  TRANSFORMERS_CACHE: "./models"

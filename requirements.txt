@@ -1,0 +1,32 @@
+# White-Box Story Pipeline Dependencies
+# Python 3.10+
+
+# Core ML/AI
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+pillow>=9.0.0
+
+# Diffusers for SDXL
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+
+# CLIP for evaluation
+clip-retrieval>=1.0.0
+# Alternative: pip install git+https://github.com/openai/CLIP.git
+
+# DINOv2 for visual features
+# Will be loaded via torch.hub: facebookresearch/dinov2
+
+# Optional: For additional evaluation metrics
+scikit-image>=0.21.0
+scipy>=1.11.0
+
+# Utilities
+tqdm>=4.65.0
+pyyaml>=6.0.0
+
+# Memory optimization (optional)
+xformers>=0.0.23  # For faster attention computation

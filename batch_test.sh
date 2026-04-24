@@ -1,42 +1,62 @@
 #!/bin/bash
+# ============================================================================
+# White-Box Story Pipeline - Batch Test Script
+# ============================================================================
 
-# Enable extended globbing (for excluding files)
-shopt -s extglob
+set -e  # Exit on error
 
-# Default GPU device (GPU 0 for testing)
-DEFAULT_CUDA_DEVICE="0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Allow command line override, e.g.: ./batch_test.sh --gpu 0
-# Simple arg parsing: if first arg is --gpu, second arg is device number
-if [[ "$1" == "--gpu" && -n "$2" ]]; then
-    CUDA_DEVICE="$2"
-    shift 2
-else
-    CUDA_DEVICE="$DEFAULT_CUDA_DEVICE"
+# Configuration
+INPUT_DIR="${1:-./data/TaskA}"
+OUTPUT_DIR="${2:-./results}"
+MODEL_PATH="${3:-stabilityai/stable-diffusion-xl-base-1.0}"
+
+echo "============================================"
+echo "White-Box Story Pipeline - Batch Test"
+echo "============================================"
+echo "Input Directory: $INPUT_DIR"
+echo "Output Directory: $OUTPUT_DIR"
+echo "Model Path: $MODEL_PATH"
+echo "============================================"
+
+# Check Python environment
+if ! command -v python &> /dev/null; then
+    echo "ERROR: Python not found"
+    exit 1
 fi
 
-# Export to environment variable
-export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
-echo "Using GPU: $CUDA_VISIBLE_DEVICES"
+# Check for required packages
+echo "Checking dependencies..."
+python -c "import torch; print(f'PyTorch: {torch.__version__}')" || { echo "PyTorch not installed"; exit 1; }
+python -c "import diffusers; print(f'Diffusers: {diffusers.__version__}')" || { echo "Diffusers not installed"; exit 1; }
 
-# Input directory
-INPUT_DIR="data/TaskA"
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
 
-# Iterate through all .txt files excluding extra_ prefix
-found=0
-for file in "$INPUT_DIR"/!(extra_*.txt); do
-    if [[ -f "$file" && "$file" == *.txt ]]; then
-        ((found++))
-        echo "Processing: $file with GPU $CUDA_VISIBLE_DEVICES"
-        python src/pipeline_runner.py --input "$file" --save_json
-        if [[ $? -ne 0 ]]; then
-            echo "Error processing $file, exiting..."
-            exit 1
-        fi
-    fi
-done
+# Run batch processing
+echo ""
+echo "Starting batch processing..."
+echo "============================================"
 
-if [[ "$found" -eq 0 ]]; then
-    echo "No matching .txt files found in $INPUT_DIR"
-    exit 1
+python -u run_pipeline.py "$INPUT_DIR" \
+    --output "$OUTPUT_DIR" \
+    --model "$MODEL_PATH" \
+    --steps 24 \
+    --candidates 2 \
+    --seed 42 \
+    --batch
+
+echo ""
+echo "============================================"
+echo "Batch processing complete!"
+echo "Results saved to: $OUTPUT_DIR"
+echo "============================================"
+
+# Show summary if available
+if [ -f "$OUTPUT_DIR/batch_results.json" ]; then
+    echo ""
+    echo "Summary:"
+    cat "$OUTPUT_DIR/batch_results.json"
 fi
