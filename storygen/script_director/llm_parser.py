@@ -221,6 +221,20 @@ List elements that must REMAIN CONSISTENT across ALL frames:
             return "female"
         return "male"
 
+    def _extract_char_from_raw_prompt(self, raw_prompt: str, char_names: List[str]) -> Optional[str]:
+        """Extract character name from raw prompt like '<Lily> makes breakfast'"""
+        import re
+        # Match <Name> pattern
+        match = re.search(r'<([A-Za-z]+)>', raw_prompt)
+        if match:
+            found_name = match.group(1)
+            # Check if it's a known character
+            for char_name in char_names:
+                if char_name.lower() == found_name.lower():
+                    return char_name
+            return found_name
+        return None
+
     def _initialize_client(self):
         """Initialize LLM client based on backend type"""
         if self.llm_backend == "local":
@@ -499,56 +513,162 @@ List elements that must REMAIN CONSISTENT across ALL frames:
 
         # Build panel list - need to map LLM output to actual scene content
         panels = []
-        for idx, panel_data in enumerate(data.get("panels", [])):
-            if isinstance(panel_data, dict):
-                # Get raw_prompt from actual scene content
-                raw_prompt = f"Scene {idx + 1}"
-                if idx < len(scenes):
-                    raw_prompt = scenes[idx].get('content', raw_prompt)
-                elif panel_data.get('key_actions'):
-                    # Try to construct from key_actions
+        llm_panels = data.get("panels", [])
+        num_scenes = len(scenes)
+        num_llm_panels = len(llm_panels)
+        
+        # CRITICAL FIX: Ensure panel count matches scene count
+        # If LLM output fewer panels than scenes, we need to fill in the gaps
+        if num_llm_panels < num_scenes:
+            print(f"[Director] Warning: LLM output {num_llm_panels} panels but script has {num_scenes} scenes. Filling gaps...")
+        
+        for idx in range(num_scenes):  # Always iterate over all scenes
+            panel_data = llm_panels[idx] if idx < num_llm_panels else None
+            
+            # Get raw_prompt from actual scene content
+            raw_prompt = scenes[idx].get('content', f"Scene {idx + 1}") if idx < len(scenes) else f"Scene {idx + 1}"
+            
+            # CRITICAL FIX: Ensure enhanced_prompt includes character description
+            enhanced_prompt = ""
+            shot_type = "medium"
+            time_of_day = "daytime"
+            setting = ""
+            key_objects = ""
+            
+            if panel_data and isinstance(panel_data, dict):
+                enhanced_prompt = panel_data.get('enhanced_prompt', '')
+                shot_type = panel_data.get('shot_type', 'medium')
+                time_of_day = panel_data.get('time_of_day', 'daytime')
+                setting = panel_data.get('setting', '')
+                key_objects = panel_data.get('key_objects', '')
+                
+                # CRITICAL FIX: If enhanced_prompt is too short or missing character, add character info
+                if not enhanced_prompt or len(enhanced_prompt) < 30:
+                    # Try to get from key_actions or construct
                     actions = panel_data.get('key_actions', [])
                     if actions:
-                        raw_prompt = actions[0] if isinstance(actions[0], str) else str(actions[0])
+                        enhanced_prompt = actions[0] if isinstance(actions[0], str) else str(actions[0])
                 
-                panel_data_with_defaults = {
-                    'panel_id': panel_data.get('panel_id', idx + 1),
-                    'raw_prompt': panel_data.get('raw_prompt', raw_prompt),
-                    'enhanced_prompt': panel_data.get('enhanced_prompt', ''),
-                    'shot_type': panel_data.get('shot_type', 'medium'),
-                    'camera_movement': panel_data.get('camera_movement', 'static'),
-                    'lighting_mood': panel_data.get('lighting_mood', 'natural'),
-                    'key_actions': panel_data.get('key_actions', []),
-                    'interactions': panel_data.get('interactions', []),
-                    'setting': panel_data.get('setting', ''),
-                    'time_of_day': panel_data.get('time_of_day', 'daytime'),
-                    'weather': panel_data.get('weather', 'clear'),
-                    'key_objects': panel_data.get('key_objects', '')
-                }
-                panels.append(Panel(**panel_data_with_defaults))
+                # If still empty, use raw_prompt
+                if not enhanced_prompt:
+                    enhanced_prompt = raw_prompt
+                
+                # CRITICAL FIX: Ensure character name appears in enhanced_prompt
+                # Extract character name from raw_prompt
+                char_in_scene = self._extract_char_from_raw_prompt(raw_prompt, list(characters.keys()))
+                if char_in_scene and char_in_scene not in enhanced_prompt[:50]:
+                    # Prepend character name to enhanced_prompt
+                    char_info = characters.get(char_in_scene)
+                    if char_info and char_info.visual_description and "person" not in char_info.visual_description.lower():
+                        enhanced_prompt = f"{char_in_scene}, {char_info.visual_description}, {enhanced_prompt}"
+                    else:
+                        enhanced_prompt = f"{char_in_scene}, {enhanced_prompt}"
+            else:
+                # Panel data missing - use raw_prompt
+                char_in_scene = self._extract_char_from_raw_prompt(raw_prompt, list(characters.keys()))
+                if char_in_scene:
+                    char_info = characters.get(char_in_scene)
+                    if char_info:
+                        enhanced_prompt = f"{char_in_scene}, {char_info.visual_description}, {raw_prompt}"
+                    else:
+                        enhanced_prompt = f"{char_in_scene}, {raw_prompt}"
+                else:
+                    enhanced_prompt = raw_prompt
+            
+            panel_data_with_defaults = {
+                'panel_id': idx + 1,
+                'raw_prompt': raw_prompt,
+                'enhanced_prompt': enhanced_prompt,
+                'shot_type': shot_type,
+                'camera_movement': panel_data.get('camera_movement', 'static') if panel_data else 'static',
+                'lighting_mood': panel_data.get('lighting_mood', 'natural') if panel_data else 'natural',
+                'key_actions': panel_data.get('key_actions', []) if panel_data else [],
+                'interactions': panel_data.get('interactions', []) if panel_data else [],
+                'setting': setting,
+                'time_of_day': time_of_day,
+                'weather': panel_data.get('weather', 'clear') if panel_data else 'clear',
+                'key_objects': key_objects
+            }
+            panels.append(Panel(**panel_data_with_defaults))
 
         # CRITICAL FIX: Ensure all characters have complete descriptions
         # If any character has empty visual_description, key_attributes, etc., fill them in
+        import random
+        
         for char_name, char_info in characters.items():
+            # Consistent random for same name (moved inside loop)
+            random.seed(hash(char_name) % 2**32)
+            
             # Infer gender and age from name
             gender = self._infer_gender_fallback(char_name)
             age = "young adult"
             
-            # If visual_description is empty, generate a default
-            if not char_info.visual_description:
-                char_info.visual_description = f"A {age} {gender} person, realistic proportions, natural appearance, cinematic quality, 8k photorealistic"
+            # CRITICAL FIX: Generate MUCH BETTER fallback descriptions with specific features
+            # These are actually useful for SDXL unlike the generic "young adult person"
+            hair_colors = ["black hair", "brown hair", "blonde hair", "dark brown hair", "auburn hair", "red hair"]
+            hair_styles = ["short hair", "medium-length hair", "long hair", "wavy hair", "straight hair", "messy hair"]
+            eye_colors = ["brown eyes", "blue eyes", "green eyes", "hazel eyes", "gray eyes"]
+            skin_tones = ["fair skin", "medium skin tone", "olive skin", "tan skin"]
+            builds = ["slim", "average", "athletic", "medium build"]
             
-            # If key_attributes is empty, generate basic attributes
-            if not char_info.key_attributes:
-                char_info.key_attributes = ["photorealistic", gender, "natural appearance"]
+            # Check if visual_description is too generic (contains "person" but no features)
+            is_generic = "person" in char_info.visual_description.lower() if char_info.visual_description else True
             
-            # If clothing is empty, generate default casual clothing
-            if not char_info.clothing:
-                char_info.clothing = "casual comfortable clothing, realistic fabric textures"
+            if not char_info.visual_description or is_generic:
+                # Generate specific visual description with actual features
+                hair = random.choice(hair_colors)
+                style = random.choice(hair_styles)
+                eyes = random.choice(eye_colors)
+                skin = random.choice(skin_tones)
+                build = random.choice(builds)
+                
+                if gender == "female":
+                    clothing_options = [
+                        "blue blouse and jeans",
+                        "casual sweater and skirt",
+                        "red dress",
+                        "green top and white pants",
+                        "yellow shirt and black jeans"
+                    ]
+                else:
+                    clothing_options = [
+                        "blue shirt and jeans",
+                        "casual t-shirt and pants",
+                        "gray sweater and dark jeans",
+                        "green jacket and khaki pants",
+                        "white shirt and black pants"
+                    ]
+                
+                clothing = random.choice(clothing_options)
+                
+                char_info.visual_description = (
+                    f"A {age} {gender} with {hair}, {style}, {eyes}, {build} build, {skin}, wearing {clothing}"
+                )
             
-            # If appearance_details is empty, use visual_description
+            # If key_attributes is empty or generic, generate specific attributes
+            if not char_info.key_attributes or (len(char_info.key_attributes) <= 2 and "photorealistic" in str(char_info.key_attributes)):
+                hair = char_info.visual_description.split(",")[1].strip() if "," in char_info.visual_description else "distinctive hair"
+                eyes = [part for part in char_info.visual_description.split(",") if "eyes" in part]
+                eyes = eyes[0].strip() if eyes else "eye color"
+                char_info.key_attributes = [hair, eyes, "realistic proportions"]
+            
+            # If clothing is empty or generic, extract from visual_description
+            if not char_info.clothing or "clothing" in char_info.clothing.lower():
+                clothing_match = [part.strip() for part in char_info.visual_description.split(",") if "wearing" in part or "clothes" in part]
+                if clothing_match:
+                    char_info.clothing = clothing_match[0].replace("wearing ", "")
+                else:
+                    char_info.clothing = "casual comfortable clothing"
+            
+            # If appearance_details is empty, extract from visual_description
             if not char_info.appearance_details:
-                char_info.appearance_details = f"{gender} appearance, natural features"
+                # Extract specific features
+                features = [part.strip() for part in char_info.visual_description.split(",")]
+                specific_features = [f for f in features if any(x in f.lower() for x in ["hair", "eyes", "skin", "build"])]
+                if specific_features:
+                    char_info.appearance_details = ", ".join(specific_features[:3])
+                else:
+                    char_info.appearance_details = f"{gender} appearance with natural features"
 
         # Build complete ProductionBoard
         # CRITICAL: Generate default consistency_constraints if empty

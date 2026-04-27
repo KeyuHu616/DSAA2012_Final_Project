@@ -187,84 +187,152 @@ class NarrativeGenerationPipeline:
         """
         Compose final generation prompt optimized for SDXL.
         Structure: Character (START) > Scene Description > Key Objects > Time > Style
+        
+        CRITICAL: Each panel MUST have character description. If LLM output is incomplete,
+        we fall back to character data or scene content.
         """
         import re
         
         # === STEP 1: Extract character information ===
         present_char_names = self._extract_characters_from_panel(panel, characters)
         
-        # Build character count constraint
+        # Build character count constraint (used later)
         num_chars = len(present_char_names)
-        if num_chars == 1:
-            count_constraint = "EXACTLY 1 person: "
-        elif num_chars == 2:
-            count_constraint = "EXACTLY 2 people: "
-        elif num_chars > 2:
-            count_constraint = f"EXACTLY {num_chars} people: "
-        else:
-            count_constraint = ""
         
-        # Build full character description from all present characters
+        # Build full character description from character data
+        # CRITICAL FIX: Use visual_description as SINGLE SOURCE OF TRUTH
+        # Key_attributes and clothing may contradict visual_description
         char_descriptions = []
         for char_name in present_char_names:
             if char_name in characters:
                 char = characters[char_name]
+                desc = None
+                
                 if hasattr(char, 'visual_description') and char.visual_description:
-                    char_descriptions.append(char.visual_description)
-                elif hasattr(char, 'clothing') and char.clothing:
-                    char_descriptions.append(f"{char_name}, {char.clothing}")
-                else:
-                    char_descriptions.append(char_name)
+                    # visual_description is the source of truth
+                    # Verify it's not just "A person" (too generic)
+                    if "person" not in char.visual_description.lower()[:30]:
+                        desc = char.visual_description
+                
+                if not desc:
+                    # Fallback: construct from key_attributes and clothing
+                    parts = [char_name]
+                    if hasattr(char, 'key_attributes') and char.key_attributes:
+                        # Filter out contradictory attributes
+                        valid_attrs = []
+                        for attr in char.key_attributes:
+                            attr_lower = str(attr).lower()
+                            # Only keep non-contradictory attributes
+                            if not any(exclude in attr_lower for exclude in ['person', 'generic']):
+                                valid_attrs.append(str(attr))
+                        parts.extend(valid_attrs[:3])
+                    if hasattr(char, 'clothing') and char.clothing:
+                        parts.append(str(char.clothing))
+                    desc = ", ".join(parts)
+                
+                # CRITICAL: Prepend character count constraint to ensure consistency
+                # This helps SDXL maintain same person across panels
+                count_str = "EXACTLY 1 person" if num_chars == 1 else f"EXACTLY {num_chars} people"
+                desc = f"{count_str}, {desc}"
+                
+                char_descriptions.append(desc)
         
-        # === STEP 2: Build prompt with optimized structure ===
+        # === STEP 2: Build scene description ===
+        # CRITICAL FIX: Extract ONLY the scene/action part from enhanced_prompt
+        # Character description is already handled in char_descriptions
+        scene_desc = ""
+        
+        if panel.enhanced_prompt and len(panel.enhanced_prompt) > 15:
+            raw_scene = panel.enhanced_prompt
+            
+            # Pattern 1: "Name, description, action" - find action after comma
+            # Pattern 2: "Name action" - remove name at start
+            action_verbs = ["walks", "sits", "stands", "looks", "waits", "pauses", "gets", "runs", 
+                          "eating", "reading", "driving", "talking", "playing", "resting", 
+                          "laughing", "makes", "meets", "enters", "exits", "arrives", "leaves",
+                          "holds", "carries", "takes", "places", "opens", "closes", "turns"]
+            
+            # Strategy: Find the first action verb and extract from there
+            verb_pattern = r'\b(' + '|'.join(action_verbs) + r')\b'
+            match = re.search(verb_pattern, raw_scene, re.IGNORECASE)
+            
+            if match:
+                verb_pos = match.start()
+                # Extract everything from the verb onwards, but only up to quality terms
+                potential_scene = raw_scene[verb_pos:]
+                
+                # Find where quality terms start
+                quality_terms = ["photorealistic", "realistic photography", "sharp focus", 
+                               "8k detailed", "highly detailed", "masterpiece"]
+                quality_pos = len(potential_scene)
+                for term in quality_terms:
+                    pos = potential_scene.lower().find(term.lower())
+                    if pos != -1 and pos < quality_pos:
+                        quality_pos = pos
+                
+                scene_desc = potential_scene[:quality_pos].strip()
+                
+                # If scene_desc is too short or weird, fall back to raw_prompt
+                if len(scene_desc) < 20:
+                    scene_desc = re.sub(r'<[A-Z][a-z]+>\s*', '', panel.raw_prompt).strip()
+            else:
+                # No action verb found, use raw_prompt
+                scene_desc = re.sub(r'<[A-Z][a-z]+>\s*', '', panel.raw_prompt).strip()
+        else:
+            # Fall back to raw_prompt
+            scene_desc = re.sub(r'<[A-Z][a-z]+>\s*', '', panel.raw_prompt).strip()
+        
+        # Remove photorealistic/quality terms from scene_desc (we add them later)
+        quality_terms = ["photorealistic", "realistic photography", "sharp focus", 
+                        "8k detailed", "highly detailed", "masterpiece"]
+        for term in quality_terms:
+            scene_desc = re.sub(rf',\s*{re.escape(term)}', '', scene_desc, flags=re.IGNORECASE)
+            scene_desc = re.sub(rf'{re.escape(term)}\s*,\s*', '', scene_desc, flags=re.IGNORECASE)
+        scene_desc = scene_desc.rstrip(',. ')
+        
+        # === STEP 3: Compose full prompt ===
         prompt_parts = []
         
-        # 2a. Character description at START (most critical for consistency)
+        # 3a. Character at START (already includes EXACTLY N person)
         if char_descriptions:
-            char_str = count_constraint + ", ".join(char_descriptions)
-            prompt_parts.append(char_str)
+            prompt_parts.append(", ".join(char_descriptions))
         
-        # 2b. Enhanced prompt OR cleaned raw prompt (use whichever is better)
-        if panel.enhanced_prompt and len(panel.enhanced_prompt) > 20:
-            # Remove character mention from enhanced_prompt to avoid duplication
-            clean_enhanced = panel.enhanced_prompt
-            for name in present_char_names:
-                # Remove "CharacterName," or "CharacterName" at start
-                clean_enhanced = re.sub(rf'^{name},\s*', '', clean_enhanced, flags=re.IGNORECASE)
-                clean_enhanced = re.sub(rf'^{name}\s+', '', clean_enhanced, flags=re.IGNORECASE)
-            prompt_parts.append(clean_enhanced)
-        else:
-            clean_action = re.sub(r'<[A-Z][a-z]+>\s*', '', panel.raw_prompt).strip()
-            prompt_parts.append(clean_action)
+        # 3b. Scene action
+        if scene_desc:
+            prompt_parts.append(scene_desc)
         
-        # 2c. Key objects (CRITICAL for object consistency)
+        # 3c. Key objects
         if hasattr(panel, 'key_objects') and panel.key_objects:
             prompt_parts.append(f"with {panel.key_objects}")
         
-        # 2d. Time of day (from panel data)
+        # 3d. Time of day
         if hasattr(panel, 'time_of_day') and panel.time_of_day:
             prompt_parts.append(panel.time_of_day)
         
-        # 2e. Setting (maintain from panel data)
+        # 3e. Setting
         if hasattr(panel, 'setting') and panel.setting:
             prompt_parts.append(f"in {panel.setting}")
         
-        # 2f. Photorealistic style (ALWAYS last)
+        # 3f. Style (ALWAYS last)
         prompt_parts.append("photorealistic, realistic photography, sharp focus, 8k detailed")
         
-        # === STEP 3: Combine with smart truncation ===
-        # Priority: Character > Scene > Objects > Time > Setting > Style
+        # === STEP 4: Combine with truncation ===
         base_prompt = ", ".join(prompt_parts)
         
         # SDXL CLIP limit ~77 tokens ≈ 350 chars
-        if len(base_prompt) > 380:
-            # Smart truncation: keep character (first 150), then scene, truncate end
-            if len(char_descriptions) > 0:
-                char_part = count_constraint + ", ".join(char_descriptions)[:150]
-                scene_part = base_prompt[len(", ".join(prompt_parts[:2])):]
-                remaining = 380 - len(char_part) - 50  # Reserve space for style
-                if remaining > 100:
-                    base_prompt = char_part + ", " + scene_part[:remaining]
+        # Ensure we keep character description even if truncating
+        MAX_LEN = 380
+        if len(base_prompt) > MAX_LEN:
+            char_part = prompt_parts[0] if prompt_parts else ""
+            style_part = "photorealistic, realistic photography, sharp focus, 8k detailed"
+            
+            # Reserve space for character (200 chars) and style (60 chars)
+            available = MAX_LEN - len(char_part) - len(style_part) - 10
+            if available > 100:
+                middle_parts = ", ".join(prompt_parts[1:-1])
+                if len(middle_parts) > available:
+                    middle_parts = middle_parts[:available]
+                base_prompt = f"{char_part}, {middle_parts}, {style_part}"
         
         return base_prompt
     
@@ -358,11 +426,42 @@ class NarrativeGenerationPipeline:
         return ", ".join(filter(None, parts))
 
     def _extract_characters_from_panel(self, panel: Panel, all_characters: Dict) -> List[str]:
-        """Extract character names appearing in this panel"""
+        """
+        Extract character names appearing in this panel.
+        
+        CRITICAL FIX: For multi-panel stories, we need to infer character presence:
+        - Single-character stories: Character is present in ALL panels
+        - Multi-character stories: Check pronouns (they/she/he) to determine count
+        """
+        import re
+        
         present_chars = []
+        
+        # First, check explicit name mentions in raw_prompt
         for char_name in all_characters.keys():
             if f"<{char_name}>" in panel.raw_prompt or char_name.lower() in panel.raw_prompt.lower():
                 present_chars.append(char_name)
+        
+        # CRITICAL FIX: If no explicit mentions found, check story-level heuristics
+        if not present_chars:
+            all_names = list(all_characters.keys())
+            num_chars = len(all_names)
+            
+            # Single-character story: character is in ALL panels
+            if num_chars == 1:
+                present_chars = all_names
+            
+            # Multi-character story: check pronouns
+            raw_lower = panel.raw_prompt.lower()
+            if 'they' in raw_lower or 'they\'re' in raw_lower:
+                # All characters present
+                present_chars = all_names
+            elif 'she' in raw_lower or 'he' in raw_lower or 'her ' in raw_lower or 'his ' in raw_lower:
+                # One character (but which one?) - try to infer from context
+                # For simplicity, use first character
+                if all_names:
+                    present_chars = [all_names[0]]
+        
         return present_chars
 
     @torch.inference_mode()
