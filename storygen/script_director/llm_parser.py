@@ -74,25 +74,35 @@ Your task is to parse story scripts into detailed 'production blueprints' for mu
 
 ## CRITICAL RULES - MUST FOLLOW:
 
-### 1. TIMELINE CONSISTENCY (MOST IMPORTANT)
-- If the story takes place in the MORNING (breakfast, morning routine), ALL panels MUST have `time_of_day: "morning"` or `"daytime"`
+### 1. STORY CONTEXT UNDERSTANDING (MOST IMPORTANT)
+- pronouns like "He", "She", "They", "It" ALWAYS refer to characters/objects from PREVIOUS panels
+- "He pauses at the door" → Understand WHICH door from context (door of current location)
+- "She looks around" → She is in the SAME location as previous panel unless stated otherwise
+- "It chases a ball" → "It" is the SAME animal/object from previous panels
+- enhanced_prompt MUST include the setting/objects from previous panels when using pronouns
+- DO NOT assume stories are about buses or trains unless explicitly stated
+
+### 2. TIMELINE CONSISTENCY
+- If the story takes place in the MORNING (breakfast, morning routine), ALL panels MUST have `time_of_day: "morning"`
 - If the story takes place in the EVENING (dinner, evening routine), ALL panels MUST have `time_of_day: "evening"` or `"night"`
-- NEVER change time_of_day between panels unless explicitly stated in the script
-- Example: "Lily makes breakfast in the kitchen" → morning. "She sits down to eat" → ALSO morning!
+- NEVER change time_of_day between panels unless explicitly stated
 
-### 2. SETTING CONSISTENCY
-- If the story starts in a KITCHEN, subsequent panels should be KITCHEN or dining area near kitchen
-- NEVER change setting drastically (e.g., kitchen → living room) unless script explicitly states location change
-- Panel settings should flow naturally: kitchen → kitchen dining area → nearby room
+### 3. SETTING CONSISTENCY
+- If the story starts in a KITCHEN, subsequent panels should be KITCHEN or dining area
+- If the story starts in a PARK, subsequent panels should remain in outdoor park settings
+- Setting should flow naturally from the previous panel unless explicitly changed
 
-### 3. KEY OBJECTS CONSISTENCY
-- If breakfast/food is mentioned in ANY panel, it should appear in SUBSEQUENT panels where eating occurs
-- If a book is mentioned, it should appear in all reading scenes
-- Track key objects across the entire story
+### 4. VISUAL DESCRIPTION RULES
+- visual_description MUST include SPECIFIC clothing (e.g., "blue button-up shirt", NOT "casual outfit")
+- Include: hairstyle, hair color, eye color, build, skin tone, EXACT clothing description
+- clothing field should match what's in visual_description
 
-### 4. CHARACTER COUNT
-- Use "EXACTLY 1 person" or "EXACTLY 2 people" in enhanced_prompt to control character count
-- Never generate more people than are in the story
+### 5. KEY OBJECTS CONSISTENCY
+- Track key objects (book, ball, food, toys) across ALL panels
+- If an object appears in Panel 1, it should appear/remain relevant in subsequent panels
+
+### 6. CHARACTER COUNT
+- Describe characters clearly, but allow flexibility for stories with multiple characters joining
 
 Output Format:
 Strict JSON format only, with the following structure. Do not include any explanations or markdown markers."""
@@ -110,56 +120,70 @@ Please deeply analyze the following story script and output a complete productio
 ### STEP 1: Identify Story Context
 - What is the TIME OF DAY? (morning, afternoon, evening, night)
 - Where does the story TAKE PLACE? (kitchen, office, street, etc.)
-- What KEY OBJECTS appear? (breakfast food, book, coffee, etc.)
-- Once identified, these MUST REMAIN CONSISTENT across ALL panels!
+- What KEY OBJECTS appear? (breakfast food, book, coffee, toys, etc.)
+- IMPORTANT: Track WHERE the story starts - this is the base setting for ALL panels!
 
-### STEP 2: Character Analysis (characters)
+### STEP 2: Pronoun Resolution (CRITICAL!)
+When parsing scenes with pronouns (He/She/They/It):
+- "He pauses at the door" → Understand context - what door? (current location's door)
+- "She sits by the window" → Same room/location from previous panel
+- "It chases a ball" → Same animal/object from previous panels
+- enhanced_prompt MUST include the resolved context!
+
+Example:
+```
+Script: [SCENE-1] <Ryan> walks in the park.
+Script: [SCENE-2] He pauses at the door.
+WRONG: "Ryan pauses at the door"
+RIGHT: "Ryan pauses at the park entrance door"
+```
+
+### STEP 3: Character Analysis (characters)
 Create detailed profiles for each character marked with <name>:
-- `visual_description`: Detailed appearance (100+ chars), including age, hairstyle, facial features, build, clothing
+- `visual_description`: Detailed appearance (100+ chars), SPECIFIC clothing (e.g., "blue button-up shirt", NOT "casual outfit")
 - `token`: Format "sks {{name}}" as unique identifier
-- `key_attributes`: 3-5 most distinctive features (e.g., "red scarf", "round glasses", "blue eyes")
-- `clothing`: Scene-inferred clothing, maintainable across scenes
+- `key_attributes`: 3-5 most distinctive features (e.g., "short brown hair", "round glasses", "blue eyes")
+- `clothing`: SPECIFIC clothing matching visual_description (e.g., "blue shirt and jeans")
 - `appearance_details`: Specific details (hair color, eye color, skin tone)
 
-### STEP 3: Panel/Scene Planning (panels)
-CRITICAL: Time of day and setting MUST be consistent with story context!
+### STEP 4: Panel/Scene Planning (panels)
+CRITICAL: Setting and time MUST be consistent!
 
 For each [SCENE]:
 - `enhanced_prompt`: 150-200 char prompt including:
   * Character description (START with character name)
-  * Main action
-  * Setting (maintain from story context)
-  * Key objects
+  * Main action (with resolved context for pronouns)
+  * Setting (SAME as previous panel unless stated otherwise)
+  * Key objects (SAME as previous panel)
   * Lighting matching time_of_day
   * "photorealistic, realistic photography, sharp focus, 8k detailed"
   
-  **Example for morning breakfast story:**
-  "Lily, a young woman with auburn hair and glasses, sits at kitchen table eating breakfast. Modern kitchen interior, morning sunlight through window. photorealistic, realistic photography, sharp focus"
+  **Example for morning routine story:**
+  "Lily, a young woman with auburn hair and glasses, sits at kitchen table eating breakfast. Modern kitchen interior, morning sunlight through window. photorealistic..."
 
 - `shot_type`: "extreme_closeup" / "closeup" / "medium" / "wide" / "over_shoulder" / "establishing"
 - `camera_movement`: "static" / "slow_push_in" / "pull_back" / "pan_left_right" / "tracking"
 - `lighting_mood`: MUST match time_of_day (morning = warm sunlight, evening = soft lamp light)
 - `key_actions`: 2-4 specific visualizable actions
-- `interactions`: Record interactions with other characters/objects
-- `setting`: Detailed scene description (MUST be consistent with story context!)
-- `time_of_day`: MUST be SAME for ALL panels in same-time stories! (morning/afternoon/evening/night)
+- `setting`: Detailed scene description (SAME as first panel unless changed!)
+- `time_of_day`: SAME for ALL panels in same-time stories!
 - `weather`: clear/rainy/snowy/cloudy
-- `key_objects`: breakfast food, book, coffee cup - track across scenes
+- `key_objects`: Track these across ALL panels (bus, food, book, etc.)
 
-### STEP 4: Global Style (global_style)
+### STEP 5: Global Style (global_style)
 Choose ONE style, MUST produce photorealistic images:
 - "warm_cinematic_lifestyle" - Warm cinematic drama
-- "urban_drama" - Urban drama  
+- "urban_drama" - Urban drama
 - "photorealistic_documentary" - Photorealistic documentary
 - "cinematic_realistic" - Cinematic realistic
 
-### STEP 5: Consistency Constraints (consistency_constraints)
+### STEP 6: Consistency Constraints (consistency_constraints)
 List elements that must REMAIN CONSISTENT across ALL frames:
-- Character appearance (hair, clothing, features)
-- Setting location (kitchen, office, etc.)
+- Character appearance (hair color, clothing, features)
+- Setting location (bus stop → bus interior, etc.)
 - Time of day (ALL panels same time)
 - Lighting style
-- Key objects (breakfast, book, etc.)
+- Key objects (food, book, toys, etc.)
 
 ## OUTPUT EXAMPLE:
 ```json
@@ -423,6 +447,7 @@ List elements that must REMAIN CONSISTENT across ALL frames:
             # LLM returned characters as a list
             # Match LLM characters to original names by trying to find matching tokens
             used_original_names = []
+            used_original_lower = set()
             
             for idx, char_data in enumerate(char_list):
                 if isinstance(char_data, dict):
@@ -436,6 +461,7 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                             if orig_name.lower() == name_lower:
                                 matched_orig = orig_name
                                 used_original_names.append(orig_name)
+                                used_original_lower.add(orig_name.lower())
                                 break
                         
                         # Use original name if found, otherwise keep LLM's name
@@ -461,11 +487,14 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                                     name = token_name.title()
                     
                     # If still no name, try to use original names in order
+                    # Use case-insensitive comparison to avoid duplicates
                     if not name and idx < len(original_names):
+                        used_original_lower = {n.lower() for n in used_original_names}
                         for orig_name in original_names:
-                            if orig_name not in used_original_names:
+                            if orig_name.lower() not in used_original_lower:
                                 name = orig_name
                                 used_original_names.append(orig_name)
+                                used_original_lower.add(orig_name.lower())
                                 break
                     
                     if name:
@@ -481,6 +510,7 @@ List elements that must REMAIN CONSISTENT across ALL frames:
             # LLM returned characters as a dictionary
             # Keys might be token names like "sks Jack" - need to normalize
             used_original_names = []
+            used_original_lower = set()
             
             for raw_name, char_data in char_list.items():
                 if isinstance(char_data, dict):
@@ -493,11 +523,12 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                         match = re.search(r'sks[\s_]*(.+)', raw_name, re.IGNORECASE)
                         if match:
                             token_name = match.group(1).strip()
-                            # Try to match with original names
+                            # Try to match with original names (case-insensitive)
                             for orig_name in original_names:
-                                if orig_name.lower() == token_name.lower() and orig_name not in used_original_names:
+                                if orig_name.lower() == token_name.lower() and orig_name.lower() not in used_original_lower:
                                     name = orig_name
                                     used_original_names.append(orig_name)
+                                    used_original_lower.add(orig_name.lower())
                                     break
                             if name == raw_name:  # No match found
                                 name = token_name.title()
@@ -510,6 +541,112 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                         clothing=char_data.get("clothing", ""),
                         appearance_details=char_data.get("appearance_details", "")
                     )
+        
+        # CRITICAL FIX: Check for MISSING characters that are in original_names but not in LLM output
+        # LLM sometimes only returns some characters (e.g., Jack but not Sara in "<Jack> and <Sara>")
+        # Use case-insensitive comparison to avoid duplicates like "milo" vs "Milo"
+        existing_names_lower = {k.lower() for k in characters.keys()}
+        missing_chars = [name for name in original_names if name.lower() not in existing_names_lower]
+        
+        if missing_chars:
+            print(f"[Director] Warning: LLM missed characters: {missing_chars}. Creating placeholders.")
+            for name in missing_chars:
+                characters[name] = Character(
+                    name=name,
+                    visual_description="",  # Will be filled by the character enhancement logic below
+                    token=f"sks {name.lower().replace(' ', '_')}",
+                    key_attributes=[],
+                    clothing="",
+                    appearance_details=""
+                )
+        
+        # Also handle case where LLM returned empty characters dict entirely
+        if not characters and original_names:
+            print(f"[Director] Warning: LLM returned empty characters. Creating from script: {original_names}")
+            for name in original_names:
+                characters[name] = Character(
+                    name=name,
+                    visual_description="",
+                    token=f"sks {name.lower().replace(' ', '_')}",
+                    key_attributes=[],
+                    clothing="",
+                    appearance_details=""
+                )
+        
+        # CRITICAL FIX: Remove duplicate characters caused by case differences
+        # If LLM returns both "milo" and "Milo", keep the one whose visual_description is actually USED in enhanced_prompts
+        if len(characters) > len(set(k.lower() for k in characters.keys())):
+            print(f"[Director] Warning: Found duplicate characters with different case. Deduplicating...")
+            
+            # Analyze panels to see which character's visual_description is actually USED in enhanced_prompts
+            panels_data = data.get("panels", [])
+            
+            # Count based on visual_description matching in enhanced_prompts
+            desc_usage = {}
+            for key in characters.keys():
+                char_info = characters[key]
+                visual_desc = char_info.visual_description.lower() if char_info.visual_description else ""
+                desc_usage[key] = 0
+                
+                for panel in panels_data:
+                    ep = (panel.get("enhanced_prompt", "") or "").lower()
+                    # Check if visual_description (first 50 chars to avoid full match issues) appears in enhanced_prompt
+                    if visual_desc and len(visual_desc) > 20:
+                        # Use first 40 chars of visual_description for matching
+                        desc_prefix = visual_desc[:40]
+                        if desc_prefix in ep:
+                            desc_usage[key] += 1
+            
+            # Group keys by lowercase
+            groups = {}
+            for key in characters.keys():
+                key_lower = key.lower()
+                if key_lower not in groups:
+                    groups[key_lower] = []
+                groups[key_lower].append(key)
+            
+            # For each group, determine which to keep
+            keys_to_remove = []
+            for key_lower, keys in groups.items():
+                if len(keys) > 1:
+                    # Multiple versions of the same name
+                    # PRIORITY: 
+                    # 1. Use the one whose visual_description appears in enhanced_prompts
+                    # 2. OR match original_names exactly
+                    # 3. Or default to first
+                    
+                    keep_key = None
+                    
+                    # Find the one with most visual_description usage in enhanced_prompts
+                    max_usage = -1
+                    for key in keys:
+                        usage = desc_usage.get(key, 0)
+                        if usage > max_usage:
+                            max_usage = usage
+                            keep_key = key
+                    
+                    # If there's a clear winner by description usage, use it
+                    if max_usage > 0:
+                        # Found a clear winner by description usage
+                        pass
+                    else:
+                        # No description usage - prefer original_names match
+                        for key in keys:
+                            if key in original_names:
+                                keep_key = key
+                                break
+                    
+                    if not keep_key:
+                        keep_key = keys[0]  # Default to first
+                    
+                    print(f"  Keeping: {keep_key} (desc usage: {desc_usage.get(keep_key, 0)}, removing: {[k for k in keys if k != keep_key]})")
+                    for key in keys:
+                        if key != keep_key:
+                            print(f"    Removing duplicate: {key}")
+                            keys_to_remove.append(key)
+            
+            for key in keys_to_remove:
+                del characters[key]
 
         # Build panel list - need to map LLM output to actual scene content
         panels = []
@@ -554,8 +691,16 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                     enhanced_prompt = raw_prompt
                 
                 # CRITICAL FIX: Ensure character name appears in enhanced_prompt
-                # Extract character name from raw_prompt
+                # First, try to extract character name from raw_prompt
                 char_in_scene = self._extract_char_from_raw_prompt(raw_prompt, list(characters.keys()))
+                
+                # If no character in raw_prompt (environmental description like "city lights come on"),
+                # use the first character from previous panels as the main character
+                if not char_in_scene and characters and idx > 0:
+                    # Get first character's name as default
+                    first_char = list(characters.keys())[0]
+                    char_in_scene = first_char
+                
                 if char_in_scene and char_in_scene not in enhanced_prompt[:50]:
                     # Prepend character name to enhanced_prompt
                     char_info = characters.get(char_in_scene)
@@ -574,6 +719,29 @@ List elements that must REMAIN CONSISTENT across ALL frames:
                         enhanced_prompt = f"{char_in_scene}, {raw_prompt}"
                 else:
                     enhanced_prompt = raw_prompt
+            
+            # CRITICAL FIX: Infer better shot type based on panel content
+            # - Environmental descriptions (lights, scenery) should NOT be close-ups
+            # - Panels with pronouns and no named character might be reactions
+            raw_lower = raw_prompt.lower()
+            
+            # Environmental/description-only panels should be wide or establishing
+            env_keywords = ['lights', 'skyline', 'scenery', 'view', 'landscape', 'come on', 'begins', 'starts']
+            is_env_panel = any(kw in raw_lower for kw in env_keywords) and not any(c.lower() in raw_lower for c in characters.keys())
+            
+            # If shot type is close-up/medium but panel is environmental, adjust to wide
+            if is_env_panel and shot_type in ['closeup', 'medium']:
+                shot_type = "wide"
+            
+            # If panel mentions "looks" or "smiles" or "reacts", use medium shot to show character
+            reaction_keywords = ['looks', 'smile', 'laugh', 'wave', 'pause', 'stand', 'sit', 'walk']
+            if any(kw in raw_lower for kw in reaction_keywords) and shot_type in ['wide', 'extreme_closeup']:
+                shot_type = "medium"
+            
+            # CRITICAL FIX: If setting is empty but this is a continuation panel,
+            # use the previous panel's setting for consistency
+            if not setting and idx > 0 and panels:
+                setting = panels[-1].setting if hasattr(panels[-1], 'setting') else ""
             
             panel_data_with_defaults = {
                 'panel_id': idx + 1,
@@ -595,80 +763,267 @@ List elements that must REMAIN CONSISTENT across ALL frames:
         # If any character has empty visual_description, key_attributes, etc., fill them in
         import random
         
+        # Detect if this is an animal character
+        animal_keywords = ['dog', 'cat', 'bird', 'rabbit', 'horse', 'lion', 'tiger', 'bear', 
+                         'wolf', 'fox', 'deer', 'elephant', 'monkey', 'panda', 'koala',
+                         'fish', 'owl', 'eagle', 'shark', 'duck', 'chicken', 'pig', 'cow',
+                         'sheep', 'goat', 'snake', 'lizard', 'turtle', 'frog', 'puppy', 'kitten']
+        
         for char_name, char_info in characters.items():
             # Consistent random for same name (moved inside loop)
             random.seed(hash(char_name) % 2**32)
             
-            # Infer gender and age from name
-            gender = self._infer_gender_fallback(char_name)
-            age = "young adult"
+            # Check if this is an animal character
+            name_lower = char_name.lower()
+            is_animal = any(animal in name_lower for animal in animal_keywords)
             
-            # CRITICAL FIX: Generate MUCH BETTER fallback descriptions with specific features
-            # These are actually useful for SDXL unlike the generic "young adult person"
-            hair_colors = ["black hair", "brown hair", "blonde hair", "dark brown hair", "auburn hair", "red hair"]
-            hair_styles = ["short hair", "medium-length hair", "long hair", "wavy hair", "straight hair", "messy hair"]
-            eye_colors = ["brown eyes", "blue eyes", "green eyes", "hazel eyes", "gray eyes"]
-            skin_tones = ["fair skin", "medium skin tone", "olive skin", "tan skin"]
-            builds = ["slim", "average", "athletic", "medium build"]
-            
-            # Check if visual_description is too generic (contains "person" but no features)
-            is_generic = "person" in char_info.visual_description.lower() if char_info.visual_description else True
-            
-            if not char_info.visual_description or is_generic:
-                # Generate specific visual description with actual features
-                hair = random.choice(hair_colors)
-                style = random.choice(hair_styles)
-                eyes = random.choice(eye_colors)
-                skin = random.choice(skin_tones)
-                build = random.choice(builds)
+            # CRITICAL FIX: Handle animal characters differently from humans
+            if is_animal:
+                # Generate animal-specific description
+                animal_type = char_name
+                for animal_keyword in animal_keywords:
+                    if animal_keyword in name_lower:
+                        animal_type = animal_keyword
+                        break
                 
-                if gender == "female":
-                    clothing_options = [
-                        "blue blouse and jeans",
-                        "casual sweater and skirt",
-                        "red dress",
-                        "green top and white pants",
-                        "yellow shirt and black jeans"
-                    ]
-                else:
-                    clothing_options = [
-                        "blue shirt and jeans",
-                        "casual t-shirt and pants",
-                        "gray sweater and dark jeans",
-                        "green jacket and khaki pants",
-                        "white shirt and black pants"
-                    ]
+                animal_colors = ["golden brown", "black and white", "brown", "gray", "white", 
+                              "orange and white", "black", "cream colored", "rust colored"]
+                animal_features = ["fluffy fur", "smooth feathers", "shiny coat", "soft fur",
+                                 "sleek body", "powerful build", "graceful posture"]
+                animal_expressions = ["alert expression", "curious gaze", "friendly eyes",
+                                    "happy demeanor", "calm presence", "playful stance"]
                 
-                clothing = random.choice(clothing_options)
+                color = random.choice(animal_colors)
+                feature = random.choice(animal_features)
+                expression = random.choice(animal_expressions)
                 
-                char_info.visual_description = (
-                    f"A {age} {gender} with {hair}, {style}, {eyes}, {build} build, {skin}, wearing {clothing}"
-                )
-            
-            # If key_attributes is empty or generic, generate specific attributes
-            if not char_info.key_attributes or (len(char_info.key_attributes) <= 2 and "photorealistic" in str(char_info.key_attributes)):
-                hair = char_info.visual_description.split(",")[1].strip() if "," in char_info.visual_description else "distinctive hair"
-                eyes = [part for part in char_info.visual_description.split(",") if "eyes" in part]
-                eyes = eyes[0].strip() if eyes else "eye color"
-                char_info.key_attributes = [hair, eyes, "realistic proportions"]
-            
-            # If clothing is empty or generic, extract from visual_description
-            if not char_info.clothing or "clothing" in char_info.clothing.lower():
-                clothing_match = [part.strip() for part in char_info.visual_description.split(",") if "wearing" in part or "clothes" in part]
-                if clothing_match:
-                    char_info.clothing = clothing_match[0].replace("wearing ", "")
-                else:
+                # Set animal-specific description (NO clothing for animals!)
+                char_info.visual_description = f"A {color} {animal_type} with {feature}, {expression}, realistic animal proportions"
+                char_info.key_attributes = [color, feature, expression, "realistic animal"]
+                char_info.clothing = ""  # Animals don't wear clothes
+                char_info.appearance_details = f"{animal_type} with {color} {feature}"
+            else:
+                # Human character - use existing logic
+                # Infer gender and age from name
+                gender = self._infer_gender_fallback(char_name)
+                age = "young adult"
+                
+                hair_colors = ["black hair", "brown hair", "blonde hair", "dark brown hair", "auburn hair", "red hair"]
+                hair_styles = ["short hair", "medium-length hair", "long hair", "wavy hair", "straight hair", "messy hair"]
+                eye_colors = ["brown eyes", "blue eyes", "green eyes", "hazel eyes", "gray eyes"]
+                skin_tones = ["fair skin", "medium skin tone", "olive skin", "tan skin"]
+                builds = ["slim", "average", "athletic", "medium build"]
+                
+                # Check if visual_description is too generic or contradictory
+                is_generic = "person" in char_info.visual_description.lower() if char_info.visual_description else True
+                
+                if not char_info.visual_description or is_generic:
+                    # Generate specific visual description with actual features
+                    hair = random.choice(hair_colors)
+                    style = random.choice(hair_styles)
+                    eyes = random.choice(eye_colors)
+                    skin = random.choice(skin_tones)
+                    build = random.choice(builds)
+                    
+                    if gender == "female":
+                        clothing_options = [
+                            "blue blouse and jeans",
+                            "casual sweater and skirt",
+                            "red dress",
+                            "green top and white pants",
+                            "yellow shirt and black jeans"
+                        ]
+                    else:
+                        clothing_options = [
+                            "blue shirt and jeans",
+                            "casual t-shirt and pants",
+                            "gray sweater and dark jeans",
+                            "green jacket and khaki pants",
+                            "white shirt and black pants"
+                        ]
+                    
+                    clothing = random.choice(clothing_options)
+                    
+                    char_info.visual_description = (
+                        f"A {age} {gender} with {hair}, {style}, {eyes}, {build} build, {skin}, wearing {clothing}"
+                    )
+                
+                # CRITICAL FIX: Synchronize key_attributes with visual_description
+                # If they contradict, trust visual_description as source of truth
+                
+                # First, fix visual_description if it's too vague
+                vague_terms = ["casual outfit", "suitable for", "commute", "everyday", "typical", "simple"]
+                is_vague = any(term in char_info.visual_description.lower() for term in vague_terms)
+                
+                if is_vague or not char_info.visual_description:
+                    # Generate a more specific visual description
+                    hair = random.choice(hair_colors)
+                    style = random.choice(hair_styles)
+                    eyes = random.choice(eye_colors)
+                    skin = random.choice(skin_tones)
+                    build = random.choice(builds)
+                    
+                    if gender == "female":
+                        clothing = random.choice([
+                            "blue blouse and dark jeans",
+                            "casual white sweater and navy pants",
+                            "red floral dress",
+                            "green casual top and black skirt",
+                            "yellow cardigan and jeans"
+                        ])
+                    else:
+                        clothing = random.choice([
+                            "blue button-up shirt and jeans",
+                            "casual gray hoodie and dark pants",
+                            "green casual jacket and khaki pants",
+                            "white polo shirt and navy shorts",
+                            "black t-shirt and jeans"
+                        ])
+                    
+                    char_info.visual_description = (
+                        f"A {age} {gender} with {hair}, {style}, {eyes}, {build} build, {skin}, wearing {clothing}"
+                    )
+                
+                # Now extract key_attributes from the fixed visual_description
+                # CRITICAL: Extract CLEAN feature phrases, not full sentences
+                features = char_info.visual_description.split(",")
+                
+                hair_from_vd = None
+                eyes_from_vd = None
+                clothing_from_vd = None
+                
+                for f in features:
+                    f_lower = f.lower().strip()
+                    f_clean = f.strip()
+                    
+                    # Hair: look for specific hair descriptions
+                    if 'hair' in f_lower and not hair_from_vd:
+                        # Skip if it's the whole sentence (contains "is a" or starts with article)
+                        if not any(v in f_lower for v in ['is a', 'with a', 'person', 'woman', 'man', 'boy', 'girl']):
+                            hair_from_vd = f_clean
+                        elif 'hair' in f_lower:
+                            # Extract just the hair part
+                            parts = f_clean.split()
+                            hair_idx = None
+                            for idx, w in enumerate(parts):
+                                if 'hair' in w.lower():
+                                    hair_idx = idx
+                                    break
+                            if hair_idx and hair_idx > 0:
+                                # Get 2-3 words before hair
+                                start = max(0, hair_idx - 2)
+                                hair_from_vd = ' '.join(parts[start:hair_idx+1])
+                    
+                    # Eyes
+                    if 'eyes' in f_lower and not eyes_from_vd:
+                        if not any(v in f_lower for v in ['is a', 'with a']):
+                            eyes_from_vd = f_clean
+                    
+                    # Clothing
+                    if 'wearing' in f_lower and not clothing_from_vd:
+                        clothing_from_vd = f_clean.replace('wearing ', '')
+                
+                # Build clean key_attributes
+                new_attrs = []
+                if hair_from_vd:
+                    new_attrs.append(hair_from_vd)
+                if eyes_from_vd:
+                    new_attrs.append(eyes_from_vd)
+                if clothing_from_vd:
+                    new_attrs.append(clothing_from_vd)
+                new_attrs.append("realistic proportions")
+                
+                char_info.key_attributes = new_attrs
+                
+                # Update clothing field
+                if clothing_from_vd:
+                    char_info.clothing = clothing_from_vd
+                
+                # If key_attributes is still empty or too few, generate specific attributes
+                if not char_info.key_attributes or len(char_info.key_attributes) <= 2:
+                    hair = hair_colors[random.randint(0, len(hair_colors)-1)]
+                    style = hair_styles[random.randint(0, len(hair_styles)-1)]
+                    eyes = eye_colors[random.randint(0, len(eye_colors)-1)]
+                    char_info.key_attributes = [f"{hair}, {style}", eyes, "realistic proportions"]
+                
+                # If clothing is still empty or generic
+                if not char_info.clothing or "clothing" in char_info.clothing.lower():
                     char_info.clothing = "casual comfortable clothing"
+                
+                # If appearance_details is empty, extract from visual_description
+                if not char_info.appearance_details:
+                    features = [part.strip() for part in char_info.visual_description.split(",")]
+                    specific_features = [f for f in features if any(x in f.lower() for x in ["hair", "eyes", "skin", "build"])]
+                    if specific_features:
+                        char_info.appearance_details = ", ".join(specific_features[:3])
+                    else:
+                        char_info.appearance_details = f"{gender} appearance with natural features"
+
+        # CRITICAL FIX: Enforce time_of_day consistency across all panels
+        # Analyze all panels to determine the correct time setting
+        time_keywords = {
+            'night': ['night', 'darkness', 'moon', 'stars', 'evening', 'dusk', 'twilight', 'nighttime'],
+            'morning': ['morning', 'sunrise', 'dawn', 'breakfast', 'early', 'a.m.'],
+            'afternoon': ['afternoon', 'midday', 'noon', 'sunny day', 'daytime'],
+            'evening': ['evening', 'sunset', 'dusk', 'golden hour', 'dinner']
+        }
+        
+        # Count time_of_day occurrences
+        time_counts = {}
+        panel_times = []
+        for panel in panels:
+            tod = panel.time_of_day.lower() if panel.time_of_day else "daytime"
+            panel_times.append(tod)
+            time_counts[tod] = time_counts.get(tod, 0) + 1
+        
+        # Also analyze raw_prompts and enhanced_prompts for time hints
+        for panel in panels:
+            text = (panel.raw_prompt + " " + panel.enhanced_prompt).lower()
+            for time_cat, keywords in time_keywords.items():
+                if any(kw in text for kw in keywords):
+                    # Boost count for this time category
+                    time_counts[time_cat] = time_counts.get(time_cat, 0) + 0.5
+        
+        # Find the most common/indicated time
+        if time_counts:
+            dominant_time = max(time_counts, key=time_counts.get)
+        else:
+            dominant_time = "daytime"
+        
+        # Fix any panels that don't match the dominant time
+        corrected_panels = []
+        inconsistent_count = 0
+        for panel in panels:
+            panel_tod = panel.time_of_day.lower() if panel.time_of_day else "daytime"
             
-            # If appearance_details is empty, extract from visual_description
-            if not char_info.appearance_details:
-                # Extract specific features
-                features = [part.strip() for part in char_info.visual_description.split(",")]
-                specific_features = [f for f in features if any(x in f.lower() for x in ["hair", "eyes", "skin", "build"])]
-                if specific_features:
-                    char_info.appearance_details = ", ".join(specific_features[:3])
-                else:
-                    char_info.appearance_details = f"{gender} appearance with natural features"
+            # Check if this panel's time is consistent with dominant time
+            is_consistent = False
+            
+            # Direct match
+            if panel_tod == dominant_time:
+                is_consistent = True
+            # Check if panel mentions dominant time keywords
+            panel_text = (panel.raw_prompt + " " + panel.enhanced_prompt).lower()
+            dominant_keywords = time_keywords.get(dominant_time, [])
+            if any(kw in panel_text for kw in dominant_keywords):
+                is_consistent = True
+            # Check if panel time category matches dominant time category
+            for time_cat, keywords in time_keywords.items():
+                if panel_tod == time_cat and any(kw in dominant_time for kw in [time_cat]):
+                    is_consistent = True
+                    break
+            
+            if not is_consistent and dominant_time not in ['daytime', 'afternoon']:
+                # Only correct obvious mismatches (e.g., night story shouldn't have daytime panels)
+                if dominant_time in ['night', 'evening'] and panel_tod in ['daytime', 'afternoon', 'morning']:
+                    panel.time_of_day = dominant_time
+                    inconsistent_count += 1
+                elif dominant_time == 'morning' and panel_tod in ['night', 'evening']:
+                    panel.time_of_day = dominant_time
+                    inconsistent_count += 1
+        
+        if inconsistent_count > 0:
+            print(f"[Director] Fixed {inconsistent_count} panels with inconsistent time_of_day (set to '{dominant_time}')")
 
         # Build complete ProductionBoard
         # CRITICAL: Generate default consistency_constraints if empty

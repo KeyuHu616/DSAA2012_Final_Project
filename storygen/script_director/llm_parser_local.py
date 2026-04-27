@@ -490,10 +490,11 @@ class LocalQwenParser(LLMScriptParser):
             return "cozy cafe interior"
         elif 'office' in scene_lower:
             return "modern office interior"
-        elif 'bus' in scene_lower:
-            return "bus interior"
-        elif 'train' in scene_lower:
-            return "train interior"
+        # CRITICAL: Don't hardcode bus/train - use actual story context
+        elif any(word in scene_lower for word in ['bus stop', 'bus station', 'bus stop']):
+            return "bus stop, outdoor"
+        elif any(word in scene_lower for word in ['train station', 'railway']):
+            return "train station, outdoor"
         return None
     
     def _get_distinctive_features(self, name: str, gender: str, char_index: int, 
@@ -568,7 +569,7 @@ class LocalQwenParser(LLMScriptParser):
         This is the KEY METHOD for fixing narrative logic errors.
         """
         if story_context is None:
-            story_context = {'transport_mode': None, 'is_indoor_story': False, 'has_transitioned': False}
+            story_context = {'is_indoor_story': False, 'has_transitioned': False, 'detected_vehicles': []}
         
         setting = "indoor scene"
         lighting = "natural"
@@ -595,99 +596,50 @@ class LocalQwenParser(LLMScriptParser):
         # Check for "sit" - but only relevant if we're already inside
         has_sit = 'sit' in scene_lower or 'seated' in scene_lower
         
-        # Bus/train specific logic
-        has_bus = 'bus' in scene_lower
-        has_train = 'train' in scene_lower
-        has_station = 'station' in scene_lower
-        
-        # Get story mode from context - CRITICAL: use context if scene doesn't specify
-        transport_mode = story_context.get('transport_mode')
-        is_public_transport = has_bus or has_train or transport_mode in ['bus', 'train']
+        # Get detected vehicles from story context
+        detected_vehicles = story_context.get('detected_vehicles', [])
         has_transitioned = story_context.get('has_transitioned', False)
         
-        # Determine narrative stage for public transport scenes
-        if is_public_transport or transport_mode:
-            # CASE 1: At the door/threshold - NOT inside yet
-            if is_at_door:
-                if transport_mode == 'bus' or has_bus:
-                    setting = "bus stop, standing at bus entrance, urban street"
-                    lighting = "natural daylight"
-                    mood_desc = "waiting to board, transit stop"
-                elif transport_mode == 'train' or has_train:
-                    setting = "train station platform, at train doorway"
-                    lighting = "natural daylight"
-                    mood_desc = "at train entrance, waiting to board"
-                else:
-                    setting = "transit stop, waiting at entrance"
-                    lighting = "natural daylight"
-                    mood_desc = "waiting to board"
+        # CRITICAL FIX: Only use vehicle context if explicitly detected in THIS story
+        # Don't assume every story is about buses/trains!
+        is_vehicle_story = len(detected_vehicles) > 0 and any(v in scene_lower for v in detected_vehicles)
+        
+        # Determine setting based on actual story content, not hardcoded logic
+        if is_vehicle_story:
+            # Vehicle story - but be flexible about which vehicle
+            # Use actual vehicle name, not generic "bus/train"
+            vehicle_name = next((v for v in detected_vehicles if v in scene_lower), detected_vehicles[0] if detected_vehicles else None)
             
-            # CASE 2: Actually inside transport (either explicitly stated or transitioned)
-            elif is_boarding or has_transitioned or (has_sit and prev_setting and ('transit' in prev_setting.lower() or 'bus' in prev_setting.lower())):
-                if transport_mode == 'bus' or has_bus:
-                    setting = "bus interior, passenger seats, window view"
-                    lighting = "fluorescent with window light"
-                    mood_desc = "inside public transit"
-                elif transport_mode == 'train' or has_train:
-                    setting = "train interior, comfortable seats, window view"
-                    lighting = "natural window light"
-                    mood_desc = "inside train compartment"
-                elif has_sit:
-                    setting = "transit interior, passenger seat, window view"
-                    lighting = "fluorescent with window light"
-                    mood_desc = "seated in transit"
-            
-            # CASE 3: Exiting
-            elif is_exiting:
-                setting = "transit station exit, urban street view"
+            if is_at_door and vehicle_name:
+                setting = f"near a {vehicle_name}, outdoor environment"
                 lighting = "natural daylight"
-                mood_desc = "arrival atmosphere"
-            
-            # CASE 4: Approaching transport
+                mood_desc = "outdoor scene"
+            elif is_boarding or has_transitioned:
+                if vehicle_name in ['bus', 'train']:
+                    setting = f"inside {vehicle_name}, interior view"
+                    lighting = "natural window light"
+                    mood_desc = "indoor vehicle scene"
+                else:
+                    setting = "outdoor environment"
+                    lighting = "natural daylight"
+                    mood_desc = "outdoor scene"
+            elif is_exiting:
+                setting = "outdoor environment, exit area"
+                lighting = "natural daylight"
+                mood_desc = "outdoor arrival"
             elif is_transition:
-                if transport_mode == 'bus' or has_bus:
-                    setting = "urban street, approaching bus stop"
-                    lighting = "natural daylight"
-                    mood_desc = "morning commute scene"
-                elif transport_mode == 'train' or has_train:
-                    setting = "train station platform, approaching train"
-                    lighting = "natural daylight"
-                    mood_desc = "commuting by train"
-                else:
-                    setting = "transit stop, approaching"
-                    lighting = "natural daylight"
-                    mood_desc = "approaching transit"
-            
-            # CASE 5: Default - continue story context
-            elif transport_mode and prev_setting:
-                # Carry forward the previous setting if it was transport
-                if 'interior' in prev_setting.lower() or 'bus' in prev_setting.lower() or 'train' in prev_setting.lower():
-                    setting = prev_setting
-                else:
-                    setting = f"{transport_mode} stop"
+                setting = "outdoor environment"
+                lighting = "natural daylight"
+                mood_desc = "outdoor scene"
             else:
-                # Default public transport context
-                if transport_mode == 'bus':
-                    setting = "bus stop, urban street"
-                    lighting = "natural daylight"
-                    mood_desc = "transit stop"
-                elif transport_mode == 'train':
-                    setting = "train station platform"
-                    lighting = "natural daylight"
-                    mood_desc = "train station"
-                else:
-                    setting = "transit scene, urban environment"
+                setting = "outdoor environment"
+                lighting = "natural daylight"
+                mood_desc = "outdoor scene"
         else:
-            # Non-transport scenes - existing logic
-            
-            # CRITICAL: If we have transition context (sitting on transport), handle first
-            if has_sit and prev_setting and ('transit' in prev_setting.lower() or 'bus' in prev_setting.lower() or 'train' in prev_setting.lower()):
-                setting = prev_setting  # Continue from previous setting
-                lighting = "fluorescent with window light" if 'bus' in prev_setting.lower() else "natural window light"
-                mood_desc = "seated in transit, looking out window"
+            # Non-vehicle stories - existing logic
             
             # === OUTDOOR SCENES - Check these FIRST before indoor ===
-            elif any(word in scene_lower for word in ['bridge', 'over bridge', 'on a bridge']):
+            if any(word in scene_lower for word in ['bridge', 'over bridge', 'on a bridge']):
                 setting = "outdoor bridge, city skyline, urban environment"
                 lighting = "natural daylight"
                 mood_desc = "contemplative outdoor atmosphere"
@@ -981,7 +933,7 @@ class LocalQwenParser(LLMScriptParser):
                 clothing = "comfortable casual clothes, cardigan" if gender == "male" else "comfortable elegant clothes, cardigan"
             elif any(word in all_scene_lower for word in ["breakfast", "kitchen", "home", "cooking"]):
                 clothing = "casual home clothes, comfortable hoodie and pants" if gender == "male" else "casual home wear, cozy sweater and leggings"
-            elif any(word in all_scene_lower for word in ["bus", "train", "station", "commuting"]):
+            elif any(word in all_scene_lower for word in ["commuting", "street", "urban", "city"]):
                 clothing = "casual jacket, jeans, sneakers" if gender == "male" else "smart casual jacket, jeans, boots"
             elif any(word in all_scene_lower for word in ["cafe", "coffee", "restaurant", "eat", "dining"]):
                 clothing = "smart casual, button-up shirt" if gender == "male" else "smart casual, elegant blouse"
@@ -1035,22 +987,26 @@ class LocalQwenParser(LLMScriptParser):
         
         # Track narrative context across scenes (critical for multi-scene stories)
         narrative_context = {
-            'transport_mode': None,  # 'bus', 'train', or None
             'is_indoor_story': False,  # Track if story has indoor scenes
-            'has_transitioned': False,  # Track if we've transitioned (e.g., got on bus)
-            'time_of_day': 'morning',  # CRITICAL FIX: Track time progression
-            'key_objects': story_context.get('key_objects', []),  # Track key objects (breakfast, etc.)
+            'has_transitioned': False,  # Track if we've transitioned locations
+            'time_of_day': 'daytime',  # CRITICAL FIX: Track time progression
+            'key_objects': story_context.get('key_objects', []),  # Track key objects
             'primary_setting': None,  # Track primary setting for consistency
+            'detected_vehicles': [],  # Track specific vehicles mentioned (bird, car, etc.)
         }
         
         # Detect initial story context from first scene
         if scenes:
             first_scene_lower = scenes[0].get("content", "").lower()
-            if 'bus' in first_scene_lower:
-                narrative_context['transport_mode'] = 'bus'
-            elif 'train' in first_scene_lower:
-                narrative_context['transport_mode'] = 'train'
-            elif any(word in first_scene_lower for word in ['home', 'kitchen', 'cafe', 'office', 'museum']):
+            
+            # CRITICAL FIX: Only track specific, explicit vehicle mentions
+            # Don't assume every story is about buses/trains!
+            vehicle_keywords = ['bus', 'train', 'car', 'bike', 'airplane', 'boat']
+            for v in vehicle_keywords:
+                if v in first_scene_lower:
+                    narrative_context['detected_vehicles'].append(v)
+            
+            if any(word in first_scene_lower for word in ['home', 'kitchen', 'cafe', 'office', 'museum', 'room']):
                 narrative_context['is_indoor_story'] = True
             
             # CRITICAL FIX: Determine primary time from first scene
@@ -1067,14 +1023,16 @@ class LocalQwenParser(LLMScriptParser):
             is_first_scene = (i == 0)
             is_last_scene = (i == len(scenes) - 1)
             
-            # Update narrative context based on current scene
-            if 'bus' in scene_lower:
-                narrative_context['transport_mode'] = 'bus'
-            elif 'train' in scene_lower:
-                narrative_context['transport_mode'] = 'train'
+            # Update detected vehicles from current scene
+            # CRITICAL: Only add if explicitly mentioned
+            vehicle_keywords = ['bus', 'train', 'car', 'bike', 'airplane', 'boat']
+            for v in vehicle_keywords:
+                if v in scene_lower and v not in narrative_context['detected_vehicles']:
+                    narrative_context['detected_vehicles'].append(v)
             
-            # Check if character has boarded (transition point)
-            if any(word in scene_lower for word in ['gets inside', 'get inside', 'boards', 'sit']):
+            # Check if character has transitioned locations
+            transition_words = ['gets inside', 'get inside', 'boards', 'enters', 'leaves', 'arrives']
+            if any(word in scene_lower for word in transition_words):
                 narrative_context['has_transitioned'] = True
             
             # CRITICAL FIX: Update key objects from current scene

@@ -196,14 +196,15 @@ class NarrativeGenerationPipeline:
         # === STEP 1: Extract character information ===
         present_char_names = self._extract_characters_from_panel(panel, characters)
         
-        # Build character count constraint (used later)
-        num_chars = len(present_char_names)
+        # CRITICAL FIX: DO NOT hardcode character count!
+        # Let LLM flexibility handle stories with "meet his friends" or other multi-person scenarios
+        # Only use character count hint if we have explicit information
         
         # Build full character description from character data
         # CRITICAL FIX: Use visual_description as SINGLE SOURCE OF TRUTH
         # Key_attributes and clothing may contradict visual_description
         char_descriptions = []
-        for char_name in present_char_names:
+        for idx, char_name in enumerate(present_char_names):
             if char_name in characters:
                 char = characters[char_name]
                 desc = None
@@ -230,12 +231,13 @@ class NarrativeGenerationPipeline:
                         parts.append(str(char.clothing))
                     desc = ", ".join(parts)
                 
-                # CRITICAL: Prepend character count constraint to ensure consistency
-                # This helps SDXL maintain same person across panels
-                count_str = "EXACTLY 1 person" if num_chars == 1 else f"EXACTLY {num_chars} people"
-                desc = f"{count_str}, {desc}"
-                
                 char_descriptions.append(desc)
+        
+        # Combine: character descriptions (no hardcoded count constraint)
+        if char_descriptions:
+            combined_char = ", ".join(char_descriptions)
+        else:
+            combined_char = ""
         
         # === STEP 2: Build scene description ===
         # CRITICAL FIX: Extract ONLY the scene/action part from enhanced_prompt
@@ -293,9 +295,9 @@ class NarrativeGenerationPipeline:
         # === STEP 3: Compose full prompt ===
         prompt_parts = []
         
-        # 3a. Character at START (already includes EXACTLY N person)
-        if char_descriptions:
-            prompt_parts.append(", ".join(char_descriptions))
+        # 3a. Character at START (includes EXACTLY N person + all character descriptions)
+        if combined_char:
+            prompt_parts.append(combined_char)
         
         # 3b. Scene action
         if scene_desc:
