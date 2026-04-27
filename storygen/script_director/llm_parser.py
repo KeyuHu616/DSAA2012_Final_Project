@@ -40,6 +40,7 @@ class Panel:
     setting: str = ""
     time_of_day: str = "day"
     weather: str = ""
+    key_objects: str = ""  # Key objects like breakfast, book, etc.
 
     def __post_init__(self):
         if self.key_actions is None:
@@ -71,67 +72,113 @@ class LLMScriptParser:
     SYSTEM_PROMPT = """You are a professional film director and storyboard artist.
 Your task is to parse story scripts into detailed 'production blueprints' for multi-image generation systems.
 
-Core Capabilities:
-1. Visual Language Translation: Convert text descriptions into specific visual elements
-2. Character Consistency Planning: Ensure consistent appearance across scenes
-3. Narrative Rhythm Control: Enhance storytelling through visual composition
+## CRITICAL RULES - MUST FOLLOW:
+
+### 1. TIMELINE CONSISTENCY (MOST IMPORTANT)
+- If the story takes place in the MORNING (breakfast, morning routine), ALL panels MUST have `time_of_day: "morning"` or `"daytime"`
+- If the story takes place in the EVENING (dinner, evening routine), ALL panels MUST have `time_of_day: "evening"` or `"night"`
+- NEVER change time_of_day between panels unless explicitly stated in the script
+- Example: "Lily makes breakfast in the kitchen" → morning. "She sits down to eat" → ALSO morning!
+
+### 2. SETTING CONSISTENCY
+- If the story starts in a KITCHEN, subsequent panels should be KITCHEN or dining area near kitchen
+- NEVER change setting drastically (e.g., kitchen → living room) unless script explicitly states location change
+- Panel settings should flow naturally: kitchen → kitchen dining area → nearby room
+
+### 3. KEY OBJECTS CONSISTENCY
+- If breakfast/food is mentioned in ANY panel, it should appear in SUBSEQUENT panels where eating occurs
+- If a book is mentioned, it should appear in all reading scenes
+- Track key objects across the entire story
+
+### 4. CHARACTER COUNT
+- Use "EXACTLY 1 person" or "EXACTLY 2 people" in enhanced_prompt to control character count
+- Never generate more people than are in the story
 
 Output Format:
 Strict JSON format only, with the following structure. Do not include any explanations or markdown markers."""
 
     USER_PROMPT_TEMPLATE = """
-Please deeply analyze the following story script and output a complete production blueprint JSON:
+Please deeply analyze the following story script and output a complete production blueprint JSON.
 
 ## Story Script:
 ```
 {script_text}
 ```
 
-## Analysis Requirements:
+## CRITICAL ANALYSIS:
 
-### 1. Character Analysis (characters)
+### STEP 1: Identify Story Context
+- What is the TIME OF DAY? (morning, afternoon, evening, night)
+- Where does the story TAKE PLACE? (kitchen, office, street, etc.)
+- What KEY OBJECTS appear? (breakfast food, book, coffee, etc.)
+- Once identified, these MUST REMAIN CONSISTENT across ALL panels!
+
+### STEP 2: Character Analysis (characters)
 Create detailed profiles for each character marked with <name>:
-- `visual_description`: Detailed appearance description (100+ chars), including age range, hairstyle, facial features, build
+- `visual_description`: Detailed appearance (100+ chars), including age, hairstyle, facial features, build, clothing
 - `token`: Format "sks {{name}}" as unique identifier
-- `key_attributes`: 3-5 most distinctive features (e.g., "red scarf", "round glasses")
+- `key_attributes`: 3-5 most distinctive features (e.g., "red scarf", "round glasses", "blue eyes")
 - `clothing`: Scene-inferred clothing, maintainable across scenes
 - `appearance_details`: Specific details (hair color, eye color, skin tone)
 
-### 2. Panel/Scene Planning (panels)
-Create detailed storyboards for each [SCENE]:
-- `enhanced_prompt`: Expand original text into 150-200 char English image prompt including:
-  * Specific visual representation of main actions
-  * Environment details (background objects, spatial layout)
-  * Lighting effects (light source direction, color temperature, intensity)
-  * Atmosphere keywords
-  * Quality enhancement words (masterpiece, best quality, highly detailed)
+### STEP 3: Panel/Scene Planning (panels)
+CRITICAL: Time of day and setting MUST be consistent with story context!
 
-- `shot_type`: Choose most suitable shot type:
-  * "extreme_closeup" - Extreme close-up (emotion, details)
-  * "closeup" - Close-up (facial expression, upper body)
-  * "medium" - Medium shot (half body + partial environment)
-  * "wide" - Wide shot (full body + complete environment)
-  * "over_shoulder" - Over-shoulder (dialogue scenes)
-  * "establishing" - Establishing shot (new scene introduction)
+For each [SCENE]:
+- `enhanced_prompt`: 150-200 char prompt including:
+  * Character description (START with character name)
+  * Main action
+  * Setting (maintain from story context)
+  * Key objects
+  * Lighting matching time_of_day
+  * "photorealistic, realistic photography, sharp focus, 8k detailed"
+  
+  **Example for morning breakfast story:**
+  "Lily, a young woman with auburn hair and glasses, sits at kitchen table eating breakfast. Modern kitchen interior, morning sunlight through window. photorealistic, realistic photography, sharp focus"
 
-- `camera_movement`: Camera movement type
-  * "static" / "slow_push_in" / "pull_back" / "pan_left_right" / "tracking"
-
-- `lighting_mood`: Lighting atmosphere description
-- `key_actions`: Decompose into 2-4 specific visualizable actions
+- `shot_type`: "extreme_closeup" / "closeup" / "medium" / "wide" / "over_shoulder" / "establishing"
+- `camera_movement`: "static" / "slow_push_in" / "pull_back" / "pan_left_right" / "tracking"
+- `lighting_mood`: MUST match time_of_day (morning = warm sunlight, evening = soft lamp light)
+- `key_actions`: 2-4 specific visualizable actions
 - `interactions`: Record interactions with other characters/objects
-- `setting`: Detailed scene description
-- `time_of_day` and `weather`: Inferred time and weather
+- `setting`: Detailed scene description (MUST be consistent with story context!)
+- `time_of_day`: MUST be SAME for ALL panels in same-time stories! (morning/afternoon/evening/night)
+- `weather`: clear/rainy/snowy/cloudy
+- `key_objects`: breakfast food, book, coffee cup - track across scenes
 
-### 3. Global Style (global_style)
-Define overall visual style:
+### STEP 4: Global Style (global_style)
+Choose ONE style, MUST produce photorealistic images:
 - "warm_cinematic_lifestyle" - Warm cinematic drama
-- "urban_drama" - Urban drama
-- "whimsical_illustration" - Whimsical illustration style
-- "photorealistic_documentary" - Photorealistic documentary style
+- "urban_drama" - Urban drama  
+- "photorealistic_documentary" - Photorealistic documentary
+- "cinematic_realistic" - Cinematic realistic
 
-### 4. Consistency Constraints (consistency_constraints)
-List visual elements that must be strictly maintained across all frames.
+### STEP 5: Consistency Constraints (consistency_constraints)
+List elements that must REMAIN CONSISTENT across ALL frames:
+- Character appearance (hair, clothing, features)
+- Setting location (kitchen, office, etc.)
+- Time of day (ALL panels same time)
+- Lighting style
+- Key objects (breakfast, book, etc.)
+
+## OUTPUT EXAMPLE:
+```json
+{{
+  "characters": {{...}},
+  "panels": [
+    {{
+      "enhanced_prompt": "Lily, young woman with auburn hair, sitting at kitchen table eating breakfast. Modern kitchen interior, morning sunlight through window. photorealistic...",
+      "time_of_day": "morning",
+      "setting": "Modern kitchen with breakfast table",
+      "key_objects": "breakfast food, coffee cup"
+    }}
+  ],
+  "consistency_constraints": [
+    "All panels must be morning time with warm sunlight",
+    "All panels must be in or near kitchen setting"
+  ]
+}}
+```
 """
 
     def __init__(self, llm_backend: str = "local", model_name: str = None):
@@ -155,6 +202,24 @@ List visual elements that must be strictly maintained across all frames.
             "api_claude": "claude-3-5-sonnet-20241022"
         }
         return defaults.get(self.llm_backend, "gpt-4o")
+
+    def _infer_gender_fallback(self, name: str) -> str:
+        """Simple gender inference for fallback cases"""
+        name_lower = name.lower()
+        female_markers = {'girl', 'woman', 'female', 'lady', 'she', 'her', 'mom', 'nina', 'emma', 'sara', 'lily', 'olivia', 'rose'}
+        male_markers = {'boy', 'man', 'male', 'he', 'his', 'dad', 'tom', 'jack', 'ben', 'leo', 'john', 'mike'}
+        
+        for marker in female_markers:
+            if marker in name_lower:
+                return "female"
+        for marker in male_markers:
+            if marker in name_lower:
+                return "male"
+        
+        # Check name endings
+        if name_lower.endswith(('a', 'e', 'i', 'y')):
+            return "female"
+        return "male"
 
     def _initialize_client(self):
         """Initialize LLM client based on backend type"""
@@ -393,7 +458,7 @@ List visual elements that must be strictly maintained across all frames.
                         characters[name] = Character(
                             name=name,
                             visual_description=char_data.get("visual_description", ""),
-                            token=char_data.get("token", f"sks {name}"),
+                            token=char_data.get("token", f"sks {name}").replace("_", " "),  # FIX: Replace underscore with space
                             key_attributes=char_data.get("key_attributes", []),
                             clothing=char_data.get("clothing", ""),
                             appearance_details=char_data.get("appearance_details", "")
@@ -426,7 +491,7 @@ List visual elements that must be strictly maintained across all frames.
                     characters[name] = Character(
                         name=name,
                         visual_description=char_data.get("visual_description", ""),
-                        token=char_data.get("token", f"sks {name}"),
+                        token=char_data.get("token", f"sks {name}").replace("_", " "),  # FIX: Replace underscore with space
                         key_attributes=char_data.get("key_attributes", []),
                         clothing=char_data.get("clothing", ""),
                         appearance_details=char_data.get("appearance_details", "")
@@ -457,17 +522,53 @@ List visual elements that must be strictly maintained across all frames.
                     'interactions': panel_data.get('interactions', []),
                     'setting': panel_data.get('setting', ''),
                     'time_of_day': panel_data.get('time_of_day', 'daytime'),
-                    'weather': panel_data.get('weather', 'clear')
+                    'weather': panel_data.get('weather', 'clear'),
+                    'key_objects': panel_data.get('key_objects', '')
                 }
                 panels.append(Panel(**panel_data_with_defaults))
 
+        # CRITICAL FIX: Ensure all characters have complete descriptions
+        # If any character has empty visual_description, key_attributes, etc., fill them in
+        for char_name, char_info in characters.items():
+            # Infer gender and age from name
+            gender = self._infer_gender_fallback(char_name)
+            age = "young adult"
+            
+            # If visual_description is empty, generate a default
+            if not char_info.visual_description:
+                char_info.visual_description = f"A {age} {gender} person, realistic proportions, natural appearance, cinematic quality, 8k photorealistic"
+            
+            # If key_attributes is empty, generate basic attributes
+            if not char_info.key_attributes:
+                char_info.key_attributes = ["photorealistic", gender, "natural appearance"]
+            
+            # If clothing is empty, generate default casual clothing
+            if not char_info.clothing:
+                char_info.clothing = "casual comfortable clothing, realistic fabric textures"
+            
+            # If appearance_details is empty, use visual_description
+            if not char_info.appearance_details:
+                char_info.appearance_details = f"{gender} appearance, natural features"
+
         # Build complete ProductionBoard
+        # CRITICAL: Generate default consistency_constraints if empty
+        consistency_constraints = data.get("consistency_constraints", [])
+        
+        # If consistency_constraints is empty or None, generate defaults from character data
+        if not consistency_constraints:
+            consistency_constraints = []
+            for char_name, char_info in characters.items():
+                if hasattr(char_info, 'appearance_details') and char_info.appearance_details:
+                    consistency_constraints.append(f"{char_name}'s appearance details: {char_info.appearance_details}")
+                if hasattr(char_info, 'clothing') and char_info.clothing:
+                    consistency_constraints.append(f"{char_name}'s clothing: {char_info.clothing}")
+        
         board = ProductionBoard(
             story_id=f"story_{hash(data.get('global_style', '')) % 10000}",
             characters=characters,
             panels=panels,
-            global_style=data.get("global_style", "cinematic_realistic"),
-            consistency_constraints=data.get("consistency_constraints", []),
+            global_style=data.get("global_style", "warm_cinematic_lifestyle"),  # Use defined style
+            consistency_constraints=consistency_constraints,
             narrative_arc=data.get("narrative_arc", "linear")
         )
 

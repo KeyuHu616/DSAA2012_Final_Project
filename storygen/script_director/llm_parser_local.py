@@ -427,6 +427,75 @@ class LocalQwenParser(LLMScriptParser):
         
         return "adult"  # Default to adult
     
+    def _extract_story_context(self, scenes: List, characters: List[str]) -> Dict:
+        """
+        CRITICAL FIX: Extract story-level context for timeline and key objects tracking.
+        This ensures breakfast stories stay morning, key objects appear consistently, etc.
+        """
+        story_context = {
+            'is_breakfast_story': False,
+            'is_indoor_story': False,
+            'key_objects': [],
+            'total_characters': len(characters)
+        }
+        
+        if not scenes:
+            return story_context
+        
+        all_scene_text = " ".join(s.get("content", "") for s in scenes).lower()
+        
+        # Detect breakfast story (breakfast → eating)
+        if any(word in all_scene_text for word in ['breakfast', 'breakfast in the kitchen']) and \
+           any(word in all_scene_text for word in ['eat', 'eating', 'dining', 'sits down']):
+            story_context['is_breakfast_story'] = True
+            story_context['key_objects'].append("breakfast food on table")
+        
+        # Detect indoor story
+        if any(word in all_scene_text for word in ['kitchen', 'home', 'cafe', 'office', 'room']):
+            story_context['is_indoor_story'] = True
+        
+        # Extract key objects from entire story
+        if 'breakfast' in all_scene_text or 'food' in all_scene_text:
+            story_context['key_objects'].append("breakfast")
+        if 'book' in all_scene_text or 'reading' in all_scene_text:
+            story_context['key_objects'].append("book")
+        if 'coffee' in all_scene_text:
+            story_context['key_objects'].append("coffee cup")
+        
+        return story_context
+    
+    def _infer_story_time(self, scene_lower: str) -> str:
+        """
+        CRITICAL FIX: Infer the primary time of day for the story.
+        Breakfast stories = morning, etc.
+        """
+        if any(word in scene_lower for word in ['breakfast', 'morning']):
+            return "morning"
+        elif any(word in scene_lower for word in ['lunch', 'midday', 'noon']):
+            return "midday"
+        elif any(word in scene_lower for word in ['dinner', 'evening', 'sunset']):
+            return "evening"
+        elif any(word in scene_lower for word in ['night', 'dark', 'midnight']):
+            return "night"
+        return "morning"  # Default to morning for home/kitchen scenes
+    
+    def _infer_primary_setting(self, scene_lower: str) -> str:
+        """
+        CRITICAL FIX: Infer the primary setting for the story.
+        This prevents drifting from kitchen to "dimly lit dining room".
+        """
+        if 'kitchen' in scene_lower:
+            return "cozy kitchen interior, home environment"
+        elif 'cafe' in scene_lower or 'coffee' in scene_lower:
+            return "cozy cafe interior"
+        elif 'office' in scene_lower:
+            return "modern office interior"
+        elif 'bus' in scene_lower:
+            return "bus interior"
+        elif 'train' in scene_lower:
+            return "train interior"
+        return None
+    
     def _get_distinctive_features(self, name: str, gender: str, char_index: int, 
                                    age_category: str = "adult") -> str:
         """Generate distinctive visual features based on gender, age, and position"""
@@ -833,10 +902,10 @@ class LocalQwenParser(LLMScriptParser):
     def _build_scene_char_description(self, char_names: List[str], char_appearances: Dict) -> str:
         """
         Build character description string for scene.
-        Properly handles multi-person scenes by including all characters.
+        CRITICAL FIX: Include character NAME first - this is crucial for SDXL to generate the correct person.
         """
         if not char_names:
-            return "single person"
+            return "a person"
         
         descriptions = []
         for char_name in char_names:
@@ -845,25 +914,31 @@ class LocalQwenParser(LLMScriptParser):
                 gender = app.get('gender', 'male')
                 age_cat = app.get('age_category', 'adult')
                 
-                # Build proper term: "young woman", "little girl", "elderly man", etc.
-                if age_cat == "child":
-                    age_term = "little girl" if gender == "female" else "little boy"
-                elif age_cat == "elderly":
-                    age_term = "elderly woman" if gender == "female" else "elderly man"
-                else:
-                    age_term = "woman" if gender == "female" else "man"
+                # CRITICAL: Start with character NAME - this is essential for SDXL
+                # Format: "Milo, a young boy with..."
+                name_term = char_name.capitalize()  # Ensure proper capitalization
                 
-                # Add distinctive features (first feature)
-                features = app.get('appearance_details', '')
-                if features:
-                    feature_parts = [f.strip() for f in features.split(',')]
-                    feature_parts = [f for f in feature_parts if f and f.lower() not in ['man', 'woman', 'little', 'elderly']]
-                    if feature_parts:
-                        desc = f"a {age_term} with {feature_parts[0]}"
-                    else:
-                        desc = f"a {age_term}"
+                # Build age term
+                if age_cat == "child":
+                    age_term = "young child" if gender == "female" else "young child"
+                elif age_cat == "elderly":
+                    age_term = "elderly person" if gender == "female" else "elderly person"
                 else:
-                    desc = f"a {age_term}"
+                    age_term = "young adult" if gender == "female" else "young adult"
+                
+                # Get distinctive features
+                features = app.get('appearance_details', '')
+                clothing = app.get('clothing', '')
+                
+                # Build description starting with name
+                parts = [name_term]
+                if features:
+                    # Take first 2 features
+                    feature_list = [f.strip() for f in features.split(',') if f.strip()]
+                    if feature_list:
+                        parts.append(feature_list[0])
+                
+                desc = "a " + ", ".join(parts)
                 descriptions.append(desc)
         
         if len(descriptions) == 1:
@@ -885,6 +960,9 @@ class LocalQwenParser(LLMScriptParser):
         # Step 1: Generate distinctive character descriptions
         char_appearances = {}
         all_scene_text = " ".join(s.get("content", "") for s in scenes)
+        
+        # === CRITICAL FIX: Extract story context for timeline and key objects tracking ===
+        story_context = self._extract_story_context(scenes, characters)
         
         for idx, char_name in enumerate(characters):
             gender = self._infer_gender(char_name)
@@ -913,17 +991,37 @@ class LocalQwenParser(LLMScriptParser):
                 clothing = "casual outdoor clothes, t-shirt and jeans" if gender == "male" else "casual outdoor wear, rain jacket"
             elif any(word in all_scene_lower for word in ["bridge", "scenery", "view"]):
                 clothing = "casual outdoor clothes, jacket" if gender == "male" else "casual outdoor wear, elegant jacket"
+            elif any(word in all_scene_lower for word in ["classroom", "writes", "study", "education", "school"]):
+                clothing = "smart casual, button-up shirt and jeans" if gender == "male" else "smart casual, blouse and skirt"
+            elif any(word in all_scene_lower for word in ["snow", "winter", "cold"]):
+                clothing = "warm winter coat, scarf, gloves, and boots" if gender == "male" else "warm winter coat, scarf, gloves, and boots"
+            elif any(word in all_scene_lower for word in ["chef", "cooking", "kitchen"]):
+                clothing = "chef's uniform, white chef's coat with apron" if gender == "male" else "chef's uniform, white chef's coat with apron"
+            elif any(word in all_scene_lower for word in ["painting", "artist", "studio", "canvas"]):
+                clothing = "faded blue shirt, jeans, casual artistic attire" if gender == "male" else "faded blue shirt, jeans, casual artistic attire"
             else:
                 clothing = "casual elegant clothing" if gender == "male" else "casual elegant outfit"
             
             gender_term = "woman" if gender == "female" else "man"
             age_term = age_category if age_category != "adult" else "young"
-            visual_desc = f"{age_term} {gender_term}, {features}, {clothing}, realistic proportions, 8k photorealistic"
+            
+            # CRITICAL FIX: Ensure visual_description is NEVER empty
+            # Build a comprehensive visual description from all components
+            visual_desc = (
+                f"{age_term} {gender_term}, {features}, {clothing}, "
+                f"realistic proportions, cinematic quality, 8k photorealistic"
+            )
             
             char_appearances[char_name] = {
                 "visual_description": visual_desc,
                 "token": f"sks {char_name}",
-                "key_attributes": ["photorealistic", age_term, gender_term, features.split(",")[0]],
+                "key_attributes": [
+                    features.split(",")[0].strip(),  # Most distinctive feature
+                    "photorealistic",
+                    age_term,
+                    gender_term,
+                    clothing.split(",")[0].strip()  # Primary clothing style
+                ],
                 "clothing": clothing,
                 "appearance_details": features,
                 "gender": gender,
@@ -933,23 +1031,33 @@ class LocalQwenParser(LLMScriptParser):
         # Step 2: Analyze scene sequence for narrative flow
         panels = []
         prev_setting = None
+        prev_time_of_day = None
         
         # Track narrative context across scenes (critical for multi-scene stories)
-        story_context = {
+        narrative_context = {
             'transport_mode': None,  # 'bus', 'train', or None
             'is_indoor_story': False,  # Track if story has indoor scenes
             'has_transitioned': False,  # Track if we've transitioned (e.g., got on bus)
+            'time_of_day': 'morning',  # CRITICAL FIX: Track time progression
+            'key_objects': story_context.get('key_objects', []),  # Track key objects (breakfast, etc.)
+            'primary_setting': None,  # Track primary setting for consistency
         }
         
         # Detect initial story context from first scene
         if scenes:
             first_scene_lower = scenes[0].get("content", "").lower()
             if 'bus' in first_scene_lower:
-                story_context['transport_mode'] = 'bus'
+                narrative_context['transport_mode'] = 'bus'
             elif 'train' in first_scene_lower:
-                story_context['transport_mode'] = 'train'
+                narrative_context['transport_mode'] = 'train'
             elif any(word in first_scene_lower for word in ['home', 'kitchen', 'cafe', 'office', 'museum']):
-                story_context['is_indoor_story'] = True
+                narrative_context['is_indoor_story'] = True
+            
+            # CRITICAL FIX: Determine primary time from first scene
+            narrative_context['time_of_day'] = self._infer_story_time(first_scene_lower)
+            
+            # CRITICAL FIX: Extract primary setting from first scene
+            narrative_context['primary_setting'] = self._infer_primary_setting(first_scene_lower)
         
         for i, scene in enumerate(scenes):
             scene_content = scene.get("content", "")
@@ -959,29 +1067,57 @@ class LocalQwenParser(LLMScriptParser):
             is_first_scene = (i == 0)
             is_last_scene = (i == len(scenes) - 1)
             
-            # Update story context based on current scene
-            # If we've mentioned transport in any scene, track it
+            # Update narrative context based on current scene
             if 'bus' in scene_lower:
-                story_context['transport_mode'] = 'bus'
+                narrative_context['transport_mode'] = 'bus'
             elif 'train' in scene_lower:
-                story_context['transport_mode'] = 'train'
+                narrative_context['transport_mode'] = 'train'
             
             # Check if character has boarded (transition point)
             if any(word in scene_lower for word in ['gets inside', 'get inside', 'boards', 'sit']):
-                story_context['has_transitioned'] = True
+                narrative_context['has_transitioned'] = True
+            
+            # CRITICAL FIX: Update key objects from current scene
+            current_objects = self._extract_key_objects(scene_content, scene_lower)
+            for obj in current_objects:
+                if obj not in narrative_context['key_objects']:
+                    narrative_context['key_objects'].append(obj)
             
             # Infer setting based on narrative flow, not just keywords
             setting, lighting, time_of_day, mood_desc, action_desc = self._analyze_scene_context(
                 scene_content, scene_lower, characters, char_appearances,
-                is_first_scene, is_last_scene, prev_setting, story_context
+                is_first_scene, is_last_scene, prev_setting, narrative_context
             )
+            
+            # CRITICAL FIX: Enforce timeline consistency
+            # If first scene is breakfast, ALL scenes should be morning
+            if story_context.get('is_breakfast_story'):
+                time_of_day = "morning"  # Force morning throughout breakfast stories
+                lighting = "soft golden sunlight, warm morning light"
+                mood_desc = "cozy morning atmosphere"
+                # Update setting to maintain kitchen/dining area
+                if 'eat' in scene_lower or 'breakfast' in scene_lower or 'dining' in scene_lower:
+                    setting = "kitchen dining area, breakfast table"
+            elif story_context.get('is_indoor_story'):
+                # Indoor stories typically don't jump to evening
+                if time_of_day == "evening" and i < len(scenes) - 1:
+                    # Keep consistent time unless explicitly transitioning to end
+                    time_of_day = prev_time_of_day or "daytime"
+            
+            # CRITICAL FIX: Enforce setting consistency
+            # If primary setting is kitchen, don't drift to "dimly lit dining room"
+            if narrative_context['primary_setting'] and 'kitchen' in narrative_context['primary_setting']:
+                if 'dimly lit' in setting.lower() or 'lamp' in setting.lower():
+                    setting = narrative_context['primary_setting'] + ", morning light"
+            
             prev_setting = setting
+            prev_time_of_day = time_of_day
             
             # Determine shot type based on narrative
             shot_type = self._determine_shot_type(scene_lower, is_first_scene, is_last_scene)
             
             # Build character description for this scene
-            char_names_in_scene = self._get_characters_in_scene(scene_content, characters, i)
+            char_names_in_scene = self._get_characters_in_scene(scene_content, characters, i, len(characters))
             char_desc = self._build_scene_char_description(char_names_in_scene, char_appearances)
             
             # Extract key objects from raw prompt
@@ -996,25 +1132,46 @@ class LocalQwenParser(LLMScriptParser):
             elif 'night' in scene_lower or 'dark' in scene_lower:
                 weather = "clear"  # night is handled by time_of_day
             
-            # Compose enhanced prompt with proper narrative flow
+            # CRITICAL FIX: Compose enhanced prompt with proper narrative flow
+            # This ensures: character → setting → action → key objects → time → style
             enhanced_parts = []
+            
+            # 1. Character description (most important for consistency)
             if char_desc:
                 enhanced_parts.append(char_desc)
-            if key_objects:
-                enhanced_parts.append(key_objects)
+            
+            # 2. Key action (from scene content)
             if action_desc:
                 enhanced_parts.append(action_desc)
+            
+            # 3. Key objects - CRITICAL for breakfast stories
+            if key_objects:
+                enhanced_parts.append(key_objects)
+            
+            # 4. Setting (explicitly mention location - maintain consistency)
             if setting:
                 enhanced_parts.append(f"in {setting}")
+            
+            # 5. Mood/atmosphere
             if mood_desc:
                 enhanced_parts.append(mood_desc)
+            
+            # 6. Shot type
             enhanced_parts.append(f"{shot_type} shot")
-            if lighting != "natural":
-                enhanced_parts.append(f"{lighting} lighting")
+            
+            # 7. Time of day - CRITICAL for timeline control
             enhanced_parts.append(time_of_day)
-            enhanced_parts.append("cinematic photorealistic, 8k, highly detailed")
+            
+            # 8. Quality/style (keep minimal to save tokens)
+            enhanced_parts.append("cinematic, 8k photorealistic")
             
             enhanced_prompt = ", ".join(filter(None, enhanced_parts))
+            
+            # CRITICAL FIX: Limit prompt length for SDXL
+            # Keep: character (80) + setting (100) + time (30) + style (50) = ~260 chars
+            if len(enhanced_prompt) > 350:
+                # Prioritize: character > setting > action > time > style
+                enhanced_prompt = enhanced_prompt[:350]
             
             panel = {
                 "panel_id": i + 1,
@@ -1026,7 +1183,8 @@ class LocalQwenParser(LLMScriptParser):
                 "key_actions": [action_desc] if action_desc else [],
                 "interactions": [],
                 "setting": setting,
-                "time_of_day": time_of_day,
+                "time_of_day": time_of_day,  # CRITICAL: Include for pipeline reference
+                "key_objects": key_objects,  # CRITICAL: Include for consistency
                 "weather": weather
             }
             panels.append(panel)
@@ -1040,12 +1198,55 @@ class LocalQwenParser(LLMScriptParser):
                 "clothing": "casual clothing",
                 "appearance_details": "natural expression"
             })
-
+        
+        # CRITICAL FIX: Generate comprehensive consistency constraints
+        # These constraints are essential for maintaining visual consistency across frames
+        consistency_constraints = []
+        
+        # Character appearance constraints
+        for char_name, char_info in char_appearances.items():
+            if char_info:
+                # Add hair consistency
+                if char_info.get('appearance_details'):
+                    features = char_info['appearance_details']
+                    feature_list = [f.strip() for f in features.split(',')]
+                    for feature in feature_list[:2]:  # Top 2 features
+                        if feature and feature.lower() not in ['man', 'woman', 'young', 'little', 'elderly']:
+                            consistency_constraints.append(f"{char_name}'s {feature} must remain consistent")
+                
+                # Add clothing consistency
+                if char_info.get('clothing'):
+                    clothing = char_info['clothing'].split(',')[0].strip()
+                    consistency_constraints.append(f"{char_name}'s clothing: {clothing}")
+                
+                # Add gender/age consistency
+                gender = char_info.get('gender', 'male')
+                age = char_info.get('age_category', 'adult')
+                consistency_constraints.append(f"{char_name}'s {age} {gender} appearance must stay consistent")
+        
+        # Setting consistency constraints based on story context
+        if story_context.get('transport_mode'):
+            transport = story_context['transport_mode']
+            consistency_constraints.append(f"Maintains {transport} interior setting")
+        
+        if story_context.get('is_indoor_story'):
+            consistency_constraints.append("Indoor environment with consistent lighting")
+        
+        # Lighting consistency
+        lighting_values = list(set(p.get('lighting_mood', 'natural') for p in panels))
+        if len(lighting_values) == 1:
+            consistency_constraints.append(f"Consistent {lighting_values[0]} lighting throughout")
+        
+        # Time of day consistency
+        time_values = list(set(p.get('time_of_day', 'daytime') for p in panels))
+        if len(time_values) == 1:
+            consistency_constraints.append(f"Consistent {time_values[0]} atmosphere")
+        
         output = {
             "characters": chars_dict,
             "panels": panels,
-            "global_style": "cinematic_photorealistic",
-            "consistency_constraints": [],
+            "global_style": "warm_cinematic_lifestyle",  # Use a more defined style
+            "consistency_constraints": consistency_constraints,
             "narrative_arc": "linear"
         }
 

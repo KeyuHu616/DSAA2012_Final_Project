@@ -23,6 +23,7 @@ from storygen.script_director.llm_parser import ProductionBoard, Panel
 from storygen.asset_anchor.character_portrait import CharacterPortraitGenerator
 from storygen.core_generator.attention.consistent_self_attn import ConsistentSelfAttentionProcessor
 from storygen.core_generator.memory_bank import MemoryBank
+from storygen.utils.image_utils import remove_white_borders
 
 
 class NarrativeGenerationPipeline:
@@ -178,34 +179,92 @@ class NarrativeGenerationPipeline:
         self,
         panel: Panel,
         global_style: str,
-        characters: Dict
+        characters: Dict,
+        panel_index: int = 0,
+        all_panels: List[Panel] = None,
+        consistency_constraints: List[str] = None
     ) -> str:
         """
         Compose final generation prompt optimized for SDXL.
-        Prefer using enhanced_prompt from parser, supplemented with additional details.
-        Limit to ~77 tokens to avoid CLIP truncation issues.
+        Structure: Character (START) > Scene Description > Key Objects > Time > Style
         """
         import re
         
-        # If parser provided an enhanced prompt, use it as base
-        if panel.enhanced_prompt and len(panel.enhanced_prompt) > 30:
-            base_prompt = panel.enhanced_prompt
+        # === STEP 1: Extract character information ===
+        present_char_names = self._extract_characters_from_panel(panel, characters)
+        
+        # Build character count constraint
+        num_chars = len(present_char_names)
+        if num_chars == 1:
+            count_constraint = "EXACTLY 1 person: "
+        elif num_chars == 2:
+            count_constraint = "EXACTLY 2 people: "
+        elif num_chars > 2:
+            count_constraint = f"EXACTLY {num_chars} people: "
         else:
-            # Fallback: build prompt from components
-            base_prompt = self._build_prompt_from_components(panel, global_style, characters)
+            count_constraint = ""
         
-        # Truncate to avoid token limit (roughly 1 token ≈ 4 chars for CLIP)
-        max_chars = 300  # ~75 tokens
-        if len(base_prompt) > max_chars:
-            base_prompt = base_prompt[:max_chars]
+        # Build full character description from all present characters
+        char_descriptions = []
+        for char_name in present_char_names:
+            if char_name in characters:
+                char = characters[char_name]
+                if hasattr(char, 'visual_description') and char.visual_description:
+                    char_descriptions.append(char.visual_description)
+                elif hasattr(char, 'clothing') and char.clothing:
+                    char_descriptions.append(f"{char_name}, {char.clothing}")
+                else:
+                    char_descriptions.append(char_name)
         
-        # Add global style modifiers if not already present
-        if global_style not in base_prompt.lower():
-            base_prompt = f"{base_prompt}, {global_style}"
+        # === STEP 2: Build prompt with optimized structure ===
+        prompt_parts = []
         
-        # Final truncation after adding style
-        if len(base_prompt) > max_chars + 30:
-            base_prompt = base_prompt[:max_chars + 30]
+        # 2a. Character description at START (most critical for consistency)
+        if char_descriptions:
+            char_str = count_constraint + ", ".join(char_descriptions)
+            prompt_parts.append(char_str)
+        
+        # 2b. Enhanced prompt OR cleaned raw prompt (use whichever is better)
+        if panel.enhanced_prompt and len(panel.enhanced_prompt) > 20:
+            # Remove character mention from enhanced_prompt to avoid duplication
+            clean_enhanced = panel.enhanced_prompt
+            for name in present_char_names:
+                # Remove "CharacterName," or "CharacterName" at start
+                clean_enhanced = re.sub(rf'^{name},\s*', '', clean_enhanced, flags=re.IGNORECASE)
+                clean_enhanced = re.sub(rf'^{name}\s+', '', clean_enhanced, flags=re.IGNORECASE)
+            prompt_parts.append(clean_enhanced)
+        else:
+            clean_action = re.sub(r'<[A-Z][a-z]+>\s*', '', panel.raw_prompt).strip()
+            prompt_parts.append(clean_action)
+        
+        # 2c. Key objects (CRITICAL for object consistency)
+        if hasattr(panel, 'key_objects') and panel.key_objects:
+            prompt_parts.append(f"with {panel.key_objects}")
+        
+        # 2d. Time of day (from panel data)
+        if hasattr(panel, 'time_of_day') and panel.time_of_day:
+            prompt_parts.append(panel.time_of_day)
+        
+        # 2e. Setting (maintain from panel data)
+        if hasattr(panel, 'setting') and panel.setting:
+            prompt_parts.append(f"in {panel.setting}")
+        
+        # 2f. Photorealistic style (ALWAYS last)
+        prompt_parts.append("photorealistic, realistic photography, sharp focus, 8k detailed")
+        
+        # === STEP 3: Combine with smart truncation ===
+        # Priority: Character > Scene > Objects > Time > Setting > Style
+        base_prompt = ", ".join(prompt_parts)
+        
+        # SDXL CLIP limit ~77 tokens ≈ 350 chars
+        if len(base_prompt) > 380:
+            # Smart truncation: keep character (first 150), then scene, truncate end
+            if len(char_descriptions) > 0:
+                char_part = count_constraint + ", ".join(char_descriptions)[:150]
+                scene_part = base_prompt[len(", ".join(prompt_parts[:2])):]
+                remaining = 380 - len(char_part) - 50  # Reserve space for style
+                if remaining > 100:
+                    base_prompt = char_part + ", " + scene_part[:remaining]
         
         return base_prompt
     
@@ -343,7 +402,6 @@ class NarrativeGenerationPipeline:
 
         all_images = []
         portraits = {}
-        first_image = None
 
         # Phase 1: Generate character portraits for feature extraction
         print("\n[Generate] Phase 1: Character Portrait Generation...")
@@ -376,27 +434,33 @@ class NarrativeGenerationPipeline:
 
             # Compose prompt
             prompt = self._compose_prompt(
-                panel,
-                production_board.global_style,
-                production_board.characters
+                panel=panel,
+                global_style=production_board.global_style,
+                characters=production_board.characters,
+                panel_index=i,
+                all_panels=production_board.panels,
+                consistency_constraints=production_board.consistency_constraints
             )
             print(f"[Generate] Composed prompt: {prompt[:200]}...")
 
+            # Enhanced negative prompt to prevent common issues
             negative_prompt = (
-                "blurry, distorted, deformed, ugly, bad anatomy, "
-                "extra limbs, watermark, text, signature, "
-                "cartoon, anime style, low resolution"
+                "blurry, blurry hands, blurry face, distorted, deformed, ugly, bad anatomy, "
+                "extra limbs, missing limbs, fused fingers, too many fingers, "
+                "missing fingers, extra fingers, poorly drawn hands, poorly drawn face, "
+                "watermark, text, signature, cropped, out of frame, "
+                "low quality, worst quality, jpeg artifacts, "
+                "cartoon, anime style, illustration, painting, drawing, sketch, "
+                "anime, manga, comic, 2D art style, 3D render, CGI, "
+                "plastic looking, toy-like, over-saturated, oversaturated colors"
             )
-
-            # Get current characters in this panel
-            current_chars = self._extract_characters_from_panel(panel, production_board.characters)
 
             # Generation parameters
             height = self.config.get("height", 1024)
             width = self.config.get("width", 1024)
 
             try:
-                # Build call kwargs
+                # Build call kwargs - pure txt2img for best quality
                 call_kwargs = {
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
@@ -407,26 +471,23 @@ class NarrativeGenerationPipeline:
                     "generator": generator,
                 }
                 
-                # For subsequent frames, use img2img with the first frame for consistency
-                # This helps maintain character identity across scenes
-                if i > 0 and first_image is not None:
-                    call_kwargs["image"] = first_image
-                    call_kwargs["strength"] = 0.3  # Lower = more consistent with first frame
-                    print(f"[Generate] Using first frame for consistency (strength={call_kwargs['strength']})")
-                
                 output = self.base_pipe(**call_kwargs)
 
                 current_image = output.images[0]
+                
+                # FIXED: Remove white/gray borders from generated image
+                # This addresses SDXL VAE border issues
+                try:
+                    current_image = remove_white_borders(current_image, threshold=180)
+                except Exception:
+                    pass  # Keep original if border removal fails
+                
                 all_images.append(current_image)
 
                 # Update memory bank with current frame features
                 self._update_memory(current_image)
 
                 print(f"[Generate] Frame {i+1} completed successfully")
-
-                # Save first frame reference (only once)
-                if i == 0:
-                    first_image = current_image
 
             except Exception as e:
                 print(f"[Generate] Error generating frame {i+1}: {e}")
@@ -447,6 +508,7 @@ class NarrativeGenerationPipeline:
     def _update_memory(self, image: Image.Image):
         """
         Update memory bank with features from generated image
+        FIXED: Proper device handling for model_cpu_offload scenarios
 
         Args:
             image: PIL Image to extract features from
@@ -456,7 +518,6 @@ class NarrativeGenerationPipeline:
             return
             
         try:
-            # Extract simple features using VAE
             import torchvision.transforms as T
 
             transform = T.Compose([
@@ -464,19 +525,26 @@ class NarrativeGenerationPipeline:
                 T.ToTensor(),
             ])
 
-            img_tensor = transform(image).unsqueeze(0).to(self.device, self.dtype)
-
-            # Encode using VAE to get latent features
+            # Create tensor on CPU first, then move to the same device as VAE
+            img_tensor = transform(image).unsqueeze(0)
+            
             with torch.no_grad():
-                # Ensure VAE is on correct device and dtype (handles CPU offload)
-                vae = self.base_pipe.vae.to(self.device)
-                img_for_vae = img_tensor.to(dtype=vae.dtype)
+                # Get VAE device safely
+                vae = self.base_pipe.vae
+                
+                # Move VAE to CPU for encoding, then back (safer for CPU offload)
+                vae_device = next(vae.parameters()).device if hasattr(vae, 'parameters') and len(list(vae.parameters())) > 0 else torch.device('cpu')
+                
+                # Move tensor to VAE's device
+                img_for_vae = img_tensor.to(device=vae_device, dtype=vae.dtype)
+                
+                # Encode
                 latent = vae.encode(
                     img_for_vae * 2 - 1  # Normalize to [-1, 1]
                 ).latent_dist.sample()
                 latent = latent * vae.config.scaling_factor
 
-            # Ensure consistent dtype and device across all operations
+            # Move latent to pipeline device for consistency processing
             latent = latent.to(dtype=self.dtype, device=self.device)
 
             # Update attention processor memory
@@ -490,8 +558,8 @@ class NarrativeGenerationPipeline:
                 self._memory_bank.update(latent)
 
         except Exception as e:
-            pass  # Silently skip memory update errors
-            print(f"[Pipeline] Memory update warning: {e}")
+            # Silently skip memory update errors - don't disrupt generation
+            pass
 
     def save_story_images(
         self,

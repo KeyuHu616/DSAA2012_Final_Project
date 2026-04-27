@@ -23,7 +23,7 @@ from storygen.script_director.llm_parser_local import create_qwen_parser
 from storygen.core_generator.pipeline import NarrativeGenerationPipeline
 from storygen.evaluation_hub.metric_clip import CLIPEvaluator
 from storygen.evaluation_hub.metric_consistency import ConsistencyEvaluator
-from storygen.utils.image_utils import create_storyboard
+from storygen.utils.image_utils import create_storyboard, remove_white_borders
 
 
 def test_single_file(script_file: str, output_dir: str, device: str = "cuda:5") -> dict:
@@ -70,24 +70,28 @@ def test_single_file(script_file: str, output_dir: str, device: str = "cuda:5") 
     gen_time = time.time() - gen_start
     print(f"  Generated {len(images)} frames in {gen_time:.1f}s")
 
-    # Save images
+    # Save images (with white border removal for consistency)
     for i, img in enumerate(images, 1):
-        img.save(output_path / f"frame_{i:02d}.png")
+        # Remove white borders if present
+        img_clean = remove_white_borders(img)
+        img_clean.save(output_path / f"frame_{i:02d}.png")
 
-    # Create storyboard
+    # Create storyboard (with consistent image processing)
+    images_clean = [remove_white_borders(img) for img in images]
     storyboard = create_storyboard(
-        images,
+        images_clean,
         [f"Scene {i+1}: {p.shot_type}" for i, p in enumerate(board.panels)],
         image_size=(512, 512)
     )
     storyboard.save(output_path / "storyboard.png")
 
-    # Step 4: Evaluate
+    # Step 4: Evaluate (using cleaned images)
     clip_eval = CLIPEvaluator(device=device)
     clip_scores = []
     for i, panel in enumerate(board.panels):
         prompt = panel.enhanced_prompt or panel.raw_prompt
-        score = clip_eval.compute_similarity([images[i]], [prompt])[0]
+        img_clean = remove_white_borders(images[i])
+        score = clip_eval.compute_similarity([img_clean], [prompt])[0]
         clip_scores.append(score)
         print(f"  Frame {i+1} CLIP: {score:.3f} | {prompt[:50]}...")
     
@@ -96,12 +100,13 @@ def test_single_file(script_file: str, output_dir: str, device: str = "cuda:5") 
 
     avg_clip = sum(clip_scores) / len(clip_scores) if clip_scores else 0
 
-    # LPIPS consistency
-    if len(images) > 1:
+    # LPIPS consistency (using cleaned images)
+    images_clean = [remove_white_borders(img) for img in images]
+    if len(images_clean) > 1:
         consistency_eval = ConsistencyEvaluator(device=device, metric="lpips")
         lpips_scores = []
-        for i in range(len(images) - 1):
-            dist = consistency_eval.compute_lpips_similarity(images[i], images[i + 1])
+        for i in range(len(images_clean) - 1):
+            dist = consistency_eval.compute_lpips_similarity(images_clean[i], images_clean[i + 1])
             lpips_scores.append(1 - dist)
         avg_consistency = sum(lpips_scores) / len(lpips_scores) if lpips_scores else 1.0
         del consistency_eval

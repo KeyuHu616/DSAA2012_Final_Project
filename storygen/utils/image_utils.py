@@ -6,6 +6,113 @@ Helpers for image processing and visualization
 from PIL import Image, ImageDraw, ImageFont
 from typing import List, Tuple, Optional
 import os
+import numpy as np
+
+
+def remove_white_borders(img: Image.Image, threshold: int = 200) -> Image.Image:
+    """
+    Remove white, gray or light-colored borders from an image.
+    ENHANCED: More aggressive border detection with edge-aware processing.
+    
+    Args:
+        img: PIL Image to process
+        threshold: Pixel value threshold for "border" (0-255)
+                   Higher values = more aggressive (white borders use ~240)
+                   SDXL gray borders ~180-220
+    
+    Returns:
+        Image with borders removed (resized to fill frame if needed)
+    """
+    img_array = np.array(img)
+    
+    # Handle RGBA images
+    if img_array.shape[2] == 4:
+        alpha = img_array[:, :, 3]
+        # Check for transparent edges
+        if alpha[0, 0] == 0 or alpha[0, -1] == 0 or alpha[-1, 0] == 0 or alpha[-1, -1] == 0:
+            img_array = img_array[:, :, :3]
+    
+    h, w = img_array.shape[:2]
+    orig_size = (w, h)
+    
+    # === STEP 1: Aggressive border detection ===
+    # Check all four corners - if they're all light colored, there's likely a border
+    corners = [
+        img_array[:10, :10],      # top-left
+        img_array[:10, -10:],     # top-right
+        img_array[-10:, :10],     # bottom-left
+        img_array[-10:, -10:],    # bottom-right
+    ]
+    
+    corner_avg = [np.mean(corner) for corner in corners]
+    avg_corner = np.mean(corner_avg)
+    avg_content = np.mean(img_array[20:h-20, 20:w-20])
+    
+    # If corners are much lighter than content, we have borders
+    has_border = avg_corner > avg_content + 30
+    
+    if not has_border:
+        # Also check with threshold
+        light_pixels = np.all(img_array[:, :, :3] >= threshold, axis=2)
+        border_ratio = np.sum(light_pixels) / (h * w)
+        has_border = border_ratio > 0.3  # More than 30% light pixels = border
+    
+    if not has_border:
+        return img
+    
+    # === STEP 2: Find actual content bounds ===
+    # Try multiple thresholds to find the edge
+    best_bounds = None
+    
+    for thresh in [240, 220, 200, 180, 160]:
+        is_border = np.all(img_array[:, :, :3] >= thresh, axis=2)
+        rows = np.any(~is_border, axis=1)
+        cols = np.any(~is_border, axis=0)
+        
+        if np.any(rows) and np.any(cols):
+            rmin, rmax = np.where(rows)[0][[0, -1]]
+            cmin, cmax = np.where(cols)[0][[0, -1]]
+            
+            content_h = rmax - rmin
+            content_w = cmax - cmin
+            
+            # Check if we found significant content (at least 50% of original)
+            if content_h > h * 0.5 and content_w > w * 0.5:
+                best_bounds = (rmin, rmax, cmin, cmax)
+                break
+    
+    if best_bounds is None:
+        # Fallback: find center of mass of non-light pixels
+        is_light = np.all(img_array[:, :, :3] >= 150, axis=2)
+        y_coords, x_coords = np.where(~is_light)
+        if len(y_coords) > 100:
+            rmin, rmax = y_coords.min(), y_coords.max()
+            cmin, cmax = x_coords.min(), x_coords.max()
+            best_bounds = (rmin, rmax, cmin, cmax)
+        else:
+            return img
+    
+    rmin, rmax, cmin, cmax = best_bounds
+    
+    # === STEP 3: Crop with margin ===
+    margin = 10
+    rmin = max(0, rmin - margin)
+    rmax = min(h, rmax + margin)
+    cmin = max(0, cmin - margin)
+    cmax = min(w, cmax + margin)
+    
+    cropped = img.crop((cmin, rmin, cmax, rmax))
+    
+    # === STEP 4: If border was significant, resize to fill original size ===
+    cropped_w, cropped_h = cropped.size
+    
+    # If we cropped more than 15%, resize back to fill the frame
+    if cropped_w < w * 0.85 or cropped_h < h * 0.85:
+        # Resize cropped content to fill the original frame
+        resized = cropped.resize((w, h), Image.LANCZOS)
+        return resized
+    
+    return cropped
 
 
 def create_storyboard(

@@ -12,9 +12,7 @@ class PromptEnhancer:
     """
     Prompt Enhancement Engine
 
-    Transforms structured production board data into high-quality,
-    SDXL-optimized prompts with proper style modifiers, quality enhancers,
-    and character tokens for consistency.
+    CRITICAL FIX: Ensure photorealistic style, block non-realistic styles.
     """
 
     # SDXL-optimized quality prefixes
@@ -27,26 +25,32 @@ class PromptEnhancer:
         "professional photography"
     ]
 
-    # Global style modifiers
+    # Global style modifiers - ALL converted to photorealistic
+    # CRITICAL: Remove terms that might cause animation/illustration styles
     STYLE_MODIFIERS = {
         "warm_cinematic_lifestyle": (
-            "cinematic lighting, warm color grading, film grain, "
-            "shallow depth of field, golden hour tones"
+            "photorealistic photography, cinematic lighting, warm color grading, "
+            "shallow depth of field, golden hour tones, natural shadows"
         ),
         "urban_drama": (
-            "dramatic lighting, high contrast, cool color palette, "
-            "neon accents, gritty urban atmosphere"
+            "photorealistic photography, dramatic lighting, high contrast, "
+            "cool color palette, neon accents, gritty urban atmosphere"
         ),
         "whimsical_illustration": (
-            "digital art, vibrant colors, soft lighting, "
-            "storybook illustration style, dreamy atmosphere"
+            # BLOCKED - Convert to photorealistic
+            "photorealistic photography, warm tones, natural lighting, "
+            "natural colors, realistic proportions"
         ),
         "photorealistic_documentary": (
-            "documentary photography, natural lighting, "
-            "candid moment, realistic textures, photojournalistic"
+            "photorealistic photography, documentary style, natural lighting, "
+            "candid moment, realistic textures"
         ),
         "cinematic_realistic": (
-            "cinematic composition, natural lighting, film grain, "
+            "photorealistic photography, cinematic composition, natural lighting, "
+            "shallow depth of field, professional color grading"
+        ),
+        "cinematic_photorealistic": (
+            "photorealistic photography, cinematic composition, natural lighting, "
             "shallow depth of field, professional color grading"
         )
     }
@@ -73,24 +77,20 @@ class PromptEnhancer:
         is_first_frame: bool = False
     ) -> str:
         """
-        Enhance a single panel prompt with all modifiers
-
-        Args:
-            panel: Panel/scene object
-            characters: Character dictionary
-            global_style: Global visual style
-            is_first_frame: Whether this is the first frame
-
-        Returns:
-            Enhanced prompt string ready for SDXL
+        Enhance a single panel prompt with modifiers.
+        CRITICAL FIX: Ensure photorealistic style at the end.
         """
         components = []
 
-        # 1. Quality prefixes (take top 3 most important)
-        components.extend(self.QUALITY_PREFIXES[:3])
+        # 1. Main content FIRST - this is the most important part
+        main_content = panel.enhanced_prompt if panel.enhanced_prompt else panel.raw_prompt
+        if main_content:
+            components.append(main_content)
 
-        # 2. Style modifier
-        style_mod = self.STYLE_MODIFIERS.get(global_style, "cinematic quality")
+        # 2. Style modifier (add after main content)
+        # Get style and ensure it's photorealistic
+        style_mod = self.STYLE_MODIFIERS.get(global_style, 
+            "photorealistic photography, cinematic quality")
         components.append(style_mod)
 
         # 3. Shot type modifier
@@ -98,36 +98,8 @@ class PromptEnhancer:
         if shot_mod:
             components.append(shot_mod)
 
-        # 4. Main content (from enhanced prompt or raw text)
-        main_content = panel.enhanced_prompt if panel.enhanced_prompt else panel.raw_prompt
-        components.append(main_content)
-
-        # 5. Inject character tokens for consistency
-        char_tokens = []
-        for char_name, char_info in characters.items():
-            # Only inject if character appears in this panel
-            if f"<{char_name}>" in panel.raw_prompt or char_name.lower() in panel.raw_prompt.lower():
-                char_tokens.append(char_info.token)
-                # Add key attributes for consistency reinforcement
-                if char_info.key_attributes:
-                    components.append(", ".join(char_info.key_attributes[:2]))
-
-        # Add character tokens at the beginning
-        if char_tokens:
-            components.insert(0, f"[{' + '.join(char_tokens)}]")
-
-        # 6. Lighting mood
-        if panel.lighting_mood and panel.lighting_mood != "natural":
-            components.append(panel.lighting_mood)
-
-        # 7. Technical suffixes
-        technical_suffixes = [
-            "sharp focus",
-            "professional color grading",
-            "film still",
-            "award-winning photography"
-        ]
-        components.extend(technical_suffixes)
+        # 4. Quality suffixes - include photorealistic emphasis
+        components.append("photorealistic, sharp focus, 8k detailed")
 
         # Combine into final prompt
         final_prompt = ", ".join(filter(None, components))
@@ -137,19 +109,25 @@ class PromptEnhancer:
     def create_negative_prompt(self) -> str:
         """
         Create universal negative prompt for SDXL
-
-        Returns:
-            Negative prompt string to avoid common issues
+        ENHANCED: Block animation styles and common generation issues
         """
         negative_elements = [
             "low quality",
             "blurry",
+            "blurry hands",
+            "blurry face",
             "distorted",
             "deformed",
             "ugly",
             "bad anatomy",
             "extra limbs",
+            "missing limbs",
+            "fused fingers",
+            "too many fingers",
             "missing fingers",
+            "extra fingers",
+            "poorly drawn hands",
+            "poorly drawn face",
             "watermark",
             "text",
             "signature",
@@ -157,12 +135,21 @@ class PromptEnhancer:
             "out of frame",
             "worst quality",
             "jpeg artifacts",
-            "duplicate",
-            "morbid",
-            "mutilated",
-            "mutation",
             "cartoon",
-            "anime style"
+            "anime style",
+            "illustration",
+            "painting",
+            "drawing",
+            "sketch",
+            "anime",
+            "manga",
+            "comic",
+            "2D art style",
+            "3D render",
+            "CGI",
+            "plastic looking",
+            "toy-like",
+            "over-saturated colors"
         ]
         return ", ".join(negative_elements)
 
@@ -170,15 +157,7 @@ class PromptEnhancer:
         self,
         production_board: ProductionBoard
     ) -> List[Dict[str, str]]:
-        """
-        Process all panels in a story
-
-        Args:
-            production_board: Complete production blueprint
-
-        Returns:
-            List of enhanced prompt dictionaries
-        """
+        """Process all panels in a story - SIMPLIFIED"""
         enhanced_prompts = []
         negative_prompt = self.create_negative_prompt()
 
@@ -199,8 +178,7 @@ class PromptEnhancer:
                 "is_first_frame": i == 0
             })
 
-            print(f"[Enhancer] Frame {i+1}/{len(production_board.panels)}: "
-                  f"{len(enhanced)} characters")
+            print(f"[Enhancer] Frame {i+1}: {len(enhanced)} chars")
 
         self.generated_prompts = enhanced_prompts
         return enhanced_prompts
