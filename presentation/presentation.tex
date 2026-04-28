@@ -220,15 +220,15 @@
             \hline
             01 & Lily & 0.310 & 0.393 & 0.343 \\
             \hline
-            10 & Baby & 0.294 & 0.367 & 0.323 \\
-            \hline
             11 & Olivia & 0.331 & 0.420 & 0.367 \\
             \hline
             12 & Ethan & 0.288 & 0.360 & 0.317 \\
             \hline
-            13 & Robot & 0.205 & 0.377 & 0.274 \\
-            \hline
             Extra 02 & Mark & 0.272 & 0.365 & 0.309 \\
+            \hline
+            06 & Jack + Sara & 0.288 & 0.389 & 0.328 \\
+            \hline
+            03 & Cat + Dog & 0.295 & 0.378 & 0.329 \\
             \hline
         \end{tabular}
     \end{table}
@@ -254,23 +254,44 @@
 
 % 7. Limitations
 \section{LIMITATIONS}
-\begin{frame}{Case 10: Baby - Non-Human Consistency Challenge}
+\begin{frame}{Case 03: Cat + Dog - Animal Consistency Challenge}
     \begin{columns}
         \column{0.65\textwidth}
-        \includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{images/case10_storyboard.png}
+        \includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{images/case03_storyboard.png}
         \column{0.35\textwidth}
         \footnotesize
         \textbf{Metrics:}
         \begin{itemize}
-            \item CLIP: 0.294, Consistency: 0.367
-            \item Overall: 0.323
+            \item CLIP: 0.295, Consistency: 0.378
+            \item Overall: 0.329
         \end{itemize}
         \vspace{0.3em}
         \textbf{Challenges:}
         \begin{itemize}
-            \item \textbf{Inconsistent baby features}
-            \item Face changes between frames
-            \item Skin tone variation
+            \item \textbf{Animal features inconsistent}
+            \item Multi-character tracking difficult
+            \item Scene transitions jarring
+        \end{itemize}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{Case 06: Jack + Sara - Multi-Character Consistency}
+    \begin{columns}
+        \column{0.65\textwidth}
+        \includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{images/case06_storyboard.png}
+        \column{0.35\textwidth}
+        \footnotesize
+        \textbf{Metrics:}
+        \begin{itemize}
+            \item CLIP: 0.288, Consistency: 0.389
+            \item Overall: 0.328
+        \end{itemize}
+        \vspace{0.3em}
+        \textbf{Challenges:}
+        \begin{itemize}
+            \item \textbf{Clothing changes between scenes}
+            \item LEFT/RIGHT positioning unstable
+            \item Face identity drift
         \end{itemize}
     \end{columns}
 \end{frame}
@@ -302,9 +323,9 @@
         \footnotesize
         \textbf{Challenges:}
         \begin{itemize}
-            \item \textbf{Non-human characters}: Animals, babies inconsistent
-            \item \textbf{Abstract entities}: Robots generated as humans
-            \item \textbf{Clothing details}: Minor variations
+            \item \textbf{Animal characters}: Inconsistent features
+            \item \textbf{Multi-character}: Clothing/position drift
+            \item \textbf{Abstract entities}: Robots $\rightarrow$ humans
         \end{itemize}
         \column{0.5\textwidth}
         \footnotesize
@@ -312,8 +333,8 @@
         \begin{itemize}
             \item \checkmark Human facial identity
             \item \checkmark Scene/setting consistency
+            \item \checkmark Single character stories
             \item \checkmark Lighting and mood
-            \item \checkmark Story coherence
         \end{itemize}
     \end{columns}
 \end{frame}
@@ -326,23 +347,23 @@
         \footnotesize
         \textbf{Character Consistency:}
         \begin{itemize}
-            \item Integrate IP-Adapter or ControlNet for stronger character anchoring
-            \item Implement cross-frame attention mechanisms (ReDiStory, ICSA)
-            \item Use face embedding-based consistency loss
+            \item Integrate IP-Adapter or ControlNet for stronger anchoring
+            \item Implement cross-frame attention (ReDiStory, ICSA)
+            \item Face embedding-based consistency loss
         \end{itemize}
         \column{0.5\textwidth}
         \footnotesize
         \textbf{Non-Human Characters:}
         \begin{itemize}
-            \item Specialized prompts for abstract entities
-            \item Fine-tune SDXL on non-human characters
-            \item Use reference images as additional conditioning
+            \item Specialized prompts for animals/robots
+            \item Fine-tune SDXL on non-human entities
+            \item Reference image conditioning
         \end{itemize}
     \end{columns}
     \vspace{1em}
     \begin{block}{Long-term Vision}
         \footnotesize
-        Extend to video generation with temporal consistency; integrate TTS for narrated story output
+        Video generation with temporal consistency; TTS integration for narrated stories
     \end{block}
 \end{frame}
 

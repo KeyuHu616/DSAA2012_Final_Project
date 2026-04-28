@@ -51,7 +51,7 @@
 
 ---
 
-## **[Slide 8-11: Case Studies - Quick Overview]** (~40 seconds)
+## **[Slide 8-11: Case Studies - Success Examples]** (~40 seconds)
 **[Zhenzhuo]**
 
 "Here are our success cases. Olivia shows excellent consistency - auburn hair and outfit maintained across frames. Lily preserves her round glasses and kitchen setting. Ethan maintains beach environment and lighting. Even dynamic scenes like Mark riding a bike show smooth transitions."
@@ -61,7 +61,7 @@
 ## **[Slide 12: Quantitative Results]** (~30 seconds)
 **[Keyu]**
 
-"Our evaluation uses two metrics: CLIP Score measures text-image alignment, target above 0.25. LPIPS Consistency measures inter-frame identity, target above 0.30. Overall score combines them as 60% CLIP plus 40% Consistency. Olivia achieved our best overall score of 0.367."
+"Our evaluation uses two metrics: CLIP Score measures text-image alignment, target above 0.25. LPIPS Consistency measures inter-frame identity, target above 0.30. The table shows our results on both success cases and challenge cases like multi-character and animal scenes."
 
 ---
 
@@ -72,35 +72,35 @@
 
 ---
 
-## **[Slide 14-15: Limitations - Quick Overview]** (~30 seconds)
+## **[Slide 14-16: Limitations - Challenge Cases]** (~45 seconds)
 **[Siqi]**
 
-"However, we face challenges. Non-human characters like babies show inconsistent features. Abstract entities like robots are often generated as humans, overriding our prompts. These are key limitations we identified."
+"Now let's look at our limitations. Case 03 features a cat and dog - animal characters show inconsistent features and multi-character tracking is difficult. Case 06 has Jack and Sara - we see clothing changes between scenes and face identity drift. Case 13 is a robot, but SDXL generates it as a human, overriding our prompts."
 
 ---
 
-## **[Slide 16: Summary of Limitations]** (~20 seconds)
+## **[Slide 17: Summary of Limitations]** (~20 seconds)
 **[Siqi]**
 
-"In summary: we excel at human facial identity and scene consistency. But we struggle with non-human characters and abstract entities."
+"In summary: we excel at single human character stories, scene consistency, and lighting. But we face challenges with animals, multi-character scenes, and abstract entities like robots."
 
 ---
 
-## **[Slide 17: Future Work]** (~30 seconds)
+## **[Slide 18: Future Work]** (~30 seconds)
 **[Zhenzhuo]**
 
 "For future work, we plan to integrate IP-Adapter and ControlNet for stronger character anchoring, implement cross-frame attention mechanisms, and use face embedding-based consistency loss. For non-human characters, we will develop specialized prompts and fine-tune SDXL. Long-term, we aim to extend to video generation with temporal consistency and integrate text-to-speech for narrated story output."
 
 ---
 
-## **[Slide 18: Questions & Discussion]** (~25 seconds)
+## **[Slide 19: Questions & Discussion]** (~25 seconds)
 **[Keyu]**
 
 "Our key contributions are: LLM-driven script parsing with visual anchors, CLIP-based character portrait anchoring, compressed visual memory bank for consistency, and a quantitative evaluation pipeline. Thank you! Are there any questions?"
 
 ---
 
-## **[Backup Slides 19-20]** (If needed, skip unless asked)
+## **[Backup Slides 20-21]** (If needed, skip unless asked)
 
 **[Zhenzhuo]** - "For technical details, the portrait pipeline extracts visual descriptions, generates portraits with SDXL, and stores CLIP features for cross-frame consistency."
 
@@ -119,14 +119,14 @@
 | 5 | Siqi | Phase 1 - Story Analysis | 40s |
 | 6 | Siqi | Phase 2 - Prompt Generation | 35s |
 | 7 | Siqi | Phase 3 - Refinement | 30s |
-| 8-11 | Zhenzhuo | Case Studies | 40s |
+| 8-11 | Zhenzhuo | Case Studies (Success) | 40s |
 | 12 | Keyu | Quantitative Results | 30s |
 | 13 | Keyu | Metrics Explanation | 20s |
-| 14-15 | Siqi | Limitations Cases | 30s |
-| 16 | Siqi | Summary of Limitations | 20s |
-| 17 | Zhenzhuo | Future Work | 30s |
-| 18 | Keyu | Q&A | 25s |
-| **Total** | | | **~5 min 35 sec** |
+| 14-16 | Siqi | Limitations (Challenges) | 45s |
+| 17 | Siqi | Summary of Limitations | 20s |
+| 18 | Zhenzhuo | Future Work | 30s |
+| 19 | Keyu | Q&A | 25s |
+| **Total** | | | **~5 min 30 sec** |
 
 ---
 
@@ -135,13 +135,15 @@
 ### Keyu
 - Keep opening brief - audience cares about results
 - Emphasize 100% success rate and 32 test cases
+- Results table now shows both success AND challenge cases - good contrast
 - Evaluation metrics are straightforward, don't over-explain
 - Wrap up Q&A gracefully
 
 ### Siqi
 - LLM phases are the core innovation - explain clearly
-- Limitations slide should be honest but brief
-- Don't oversell the challenges - focus on solutions in Future Work
+- Limitations section now has concrete examples: animals, multi-character, robots
+- Be honest about challenges but frame as opportunities for Future Work
+- Connect limitations to the Future Work section
 
 ### Zhenzhuo
 - Case studies: point to specific visual details on the slides
